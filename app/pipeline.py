@@ -47,8 +47,13 @@ class TextPipeline:
         typos = [ErrorLocation(**e) for e in correction["errors"]]
         sensitive_hits = [SensitiveHit(**h) for h in sensitive_raw["sensitive_words"]]
 
-        # Step 3: LLM review (may be unreachable; handled gracefully).
-        review = self.reviewer.review(corrected_text)
+        # Step 3: LLM review with full context (original, corrections, sensitive).
+        review = self.reviewer.review(
+            corrected_text,
+            original_text=text,
+            typos=typos,
+            sensitive_hits=sensitive_hits,
+        )
 
         # Step 4: optional consolidated summary call.
         if enable_summary is None:

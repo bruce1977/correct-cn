@@ -127,9 +127,34 @@ class TextReviewer:
                 "error": str(exc),
             }
 
-    def review(self, text: str) -> dict:
-        """Review ``text`` and return a result dict (see :meth:`_generate`)."""
+    def review(
+        self,
+        text: str,
+        original_text: str = None,
+        typos: list = None,
+        sensitive_hits: list = None,
+    ) -> dict:
+        """Review ``text`` and return a result dict (see :meth:`_generate`).
+
+        When ``original_text`` / ``typos`` / ``sensitive_hits`` are provided the
+        prompt includes the full correction context so the LLM can make an
+        informed recommendation.
+        """
         system, prompt = self._build_prompt(text)
+        # Enrich the prompt with pipeline context when available.
+        if original_text is not None and original_text != text:
+            context_parts = [
+                f"\n\n【原始文本】\n{original_text}",
+                f"\n\n【自动纠错结果】\n{text}",
+            ]
+            if typos:
+                typo_lines = [f"- {t.original} -> {t.corrected}（第{t.line}行，位置{t.start}-{t.end}）" for t in typos]
+                context_parts.append("\n\n【发现的错别字】\n" + "\n".join(typo_lines))
+            if sensitive_hits:
+                hit_lines = [f"- {h.word}（{h.category}，第{h.line}行）" for h in sensitive_hits]
+                context_parts.append("\n\n【命中的敏感词】\n" + "\n".join(hit_lines))
+            context_parts.append("\n\n请基于以上信息，判断是否需要进一步修改，并给出审校意见。")
+            prompt = prompt + "".join(context_parts)
         return self._generate(system, prompt)
 
     def summarize(self, context: dict) -> dict:

@@ -30,7 +30,7 @@ class FakeReviewer:
         self.calls = []
         self.summary_calls = []
 
-    def review(self, text):
+    def review(self, text, **kwargs):
         self.calls.append(text)
         return {
             "model": "fake",
