@@ -6,8 +6,11 @@ model name and timeout are supplied by the caller (typically from settings).
 """
 
 import json
+import logging
 import urllib.error
 import urllib.request
+
+logger = logging.getLogger(__name__)
 
 
 class TextReviewer:
@@ -59,10 +62,14 @@ class TextReviewer:
             headers=headers,
             method="POST",
         )
+        logger.info("Ollama request: model=%s url=%s prompt_len=%d", self.model, url, len(prompt))
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 body = json.loads(resp.read().decode("utf-8"))
             suggestions = body.get("response", "")
+            logger.info("Ollama response: model=%s response_len=%d", self.model, len(suggestions))
+            if not suggestions:
+                logger.warning("Ollama returned empty response. Raw body keys: %s", list(body.keys()))
             return {
                 "model": self.model,
                 "reachable": True,
@@ -70,13 +77,16 @@ class TextReviewer:
                 "error": None,
             }
         except urllib.error.URLError as exc:
+            error_msg = f"Ollama unreachable: {exc.reason if hasattr(exc, 'reason') else str(exc)}"
+            logger.error("Ollama request failed: model=%s url=%s error=%s", self.model, url, error_msg)
             return {
                 "model": self.model,
                 "reachable": False,
                 "suggestions": "",
-                "error": f"Ollama unreachable: {exc.reason if hasattr(exc, 'reason') else str(exc)}",
+                "error": error_msg,
             }
         except Exception as exc:  # noqa: BLE001 - surface any failure to the caller
+            logger.exception("Ollama request failed: model=%s url=%s", self.model, url)
             return {
                 "model": self.model,
                 "reachable": False,

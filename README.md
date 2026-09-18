@@ -43,7 +43,7 @@ standard library too (no python-dotenv dependency).
 - Remote dictionary refresh: `/api/sensitive/refresh` can re-pull the dictionary
   files from a remote source (default: the konsheng/Sensitive-lexicon CDN).
 - Optional API-key auth: API endpoints are gated by keys listed in
-  `/data/keys.txt` (one per line). When the file is empty the API is open.
+  `/data/.key` (one per line). When the file is empty the API is open.
 
 ---
 
@@ -221,18 +221,18 @@ dependency). `example.env` is the committed template.
 | `OLLAMA_TIMEOUT`        | `60`                                                           | Request timeout (seconds) for Ollama.                  |
 | `SENSITIVE_REMOTE_BASE` | `https://cdn.jsdelivr.net/gh/konsheng/Sensitive-lexicon@master/Vocabulary/` | Source for `/api/sensitive/refresh`. |
 | `CONFIG_PATH`           | *(resolved as `$DATA_DIR/configs/config.json`)*                | Override the config file path.                         |
-| `API_KEYS_FILE`         | `*(resolved as `$DATA_DIR/keys.txt`)*`                         | API-key file (one key per line). Empty = open API.     |
+| `API_KEYS_FILE`         | `*(resolved as `$DATA_DIR/.key`)*`                              | API-key file (one key per line). Empty = open API.     |
 
 ### API-key authentication
 
 API endpoints (`/api/*`) are protected by a simple key check. Put one key per
-line in `$DATA_DIR/keys.txt`; `#` starts a comment and blank lines are ignored.
+line in `$DATA_DIR/.key`; `#` starts a comment and blank lines are ignored.
 When the file is empty (the default), the API is open. Provide the key via
 `Authorization: Bearer <key>` or the `X-API-Key: <key>` header.
 
 ```bash
 # require a key
-echo "my-secret-key" >> data/keys.txt
+echo "my-secret-key" >> data/.key
 curl -H "Authorization: Bearer my-secret-key" http://localhost:8000/api/correct \
   -H 'Content-Type: application/json' -d '{"text":"我爱北京天安们"}'
 
