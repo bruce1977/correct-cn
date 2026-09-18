@@ -142,8 +142,7 @@ Content-Type: application/json
       "start": 5,
       "end": 7
     }
-  ],
-  "categories_checked": ["涉枪涉爆", "暴恐词库", "政治类型", "..."]
+  ]
 }
 ```
 
@@ -172,8 +171,7 @@ Content-Type: application/json
       "start": 0,
       "end": 2
     }
-  ],
-  "categories_checked": ["涉枪涉爆"]
+  ]
 }
 ```
 
@@ -208,8 +206,7 @@ Content-Type: application/json
       "start": 5,
       "end": 7
     }
-  ],
-  "categories_checked": ["涉枪涉爆", "暴恐词库", "政治类型", "..."]
+  ]
 }
 ```
 
@@ -229,8 +226,7 @@ Content-Type: application/json
 {
   "is_sensitive": false,
   "count": 0,
-  "sensitive_words": [],
-  "categories_checked": ["涉枪涉爆", "暴恐词库", "政治类型", "..."]
+  "sensitive_words": []
 }
 ```
 

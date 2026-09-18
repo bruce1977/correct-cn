@@ -271,7 +271,6 @@ def sensitive_check(req: SensitiveCheckRequest):
         is_sensitive=result["is_sensitive"],
         count=result["count"],
         sensitive_words=[SensitiveHit(**h) for h in result["sensitive_words"]],
-        categories_checked=result["categories_checked"],
     )
 
 

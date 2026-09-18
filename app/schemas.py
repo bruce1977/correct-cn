@@ -61,7 +61,6 @@ class SensitiveCheckResponse(BaseModel):
     is_sensitive: bool
     count: int
     sensitive_words: List[SensitiveHit]
-    categories_checked: List[str]
 
 
 class SensitiveRefreshRequest(BaseModel):
