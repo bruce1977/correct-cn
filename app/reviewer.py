@@ -46,9 +46,11 @@ class TextReviewer:
             "prompt": prompt,
             "system": system,
             "stream": False,
+            "think": False,
             "options": {
                 "temperature": self.config.get("temperature", 0.3),
-                "num_predict": self.config.get("max_tokens", 2048),
+                "num_predict": self.config.get("max_tokens", 4096),
+                "num_ctx": self.config.get("num_ctx", 8192),
             },
         }
         url = self.base_url + "/api/generate"
@@ -158,6 +160,7 @@ class TextReviewer:
             "model": self.model,
             "prompt": "ping",
             "stream": False,
+            "think": False,
             "options": {"num_predict": 1},
         }
         url = self.base_url + "/api/generate"
