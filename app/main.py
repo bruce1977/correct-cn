@@ -3,13 +3,13 @@
 On startup the service:
   * ensures ``DATA_DIR`` exists and seeds it with the built-in sensitive-word
     dictionaries and the unified ``config.json`` (only when they are missing),
-  * loads the API keys (``/data/.key``) used to gate the API endpoints,
+  * loads the API keys (``/data/.keys``) used to gate the API endpoints,
   * loads the sensitive-word engine (dictionaries are auto-discovered),
   * loads the MacBert correction model (heavy; failure is non-fatal),
   * prepares the Ollama reviewer and the combined pipeline.
 
 API endpoints are protected by a simple API-key check (see :func:`require_api_key`).
-When ``.key`` is empty, the API is open. ``/health`` is always open.
+When ``.keys`` is empty, the API is open. ``/health`` is always open.
 """
 
 import json
@@ -324,7 +324,9 @@ def sensitive_refresh(req: SensitiveRefreshRequest):
 @app.post("/api/review", response_model=ReviewResponse, dependencies=[Depends(require_api_key)], tags=["Review"])
 def review(req: ReviewRequest):
     reviewer: TextReviewer = app.state.reviewer
-    return ReviewResponse(**reviewer.review(req.text))
+    result = reviewer.review(req.text)
+    logger.info("Review endpoint: suggestions_len=%d, error=%s", len(result.get("suggestions", "")), result.get("error"))
+    return ReviewResponse(**result)
 
 
 # --------------------------------------------------------------------------- #

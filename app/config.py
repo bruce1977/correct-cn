@@ -160,7 +160,7 @@ class Settings:
             sensitive_remote_base=get("SENSITIVE_REMOTE_BASE"),
             config_path=os.environ.get("CONFIG_PATH") or None,
             api_keys_file=os.environ.get("API_KEYS_FILE")
-            or os.path.join(get("DATA_DIR"), ".key"),
+            or os.path.join(get("DATA_DIR"), ".keys"),
         )
 
 
