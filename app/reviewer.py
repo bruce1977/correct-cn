@@ -1,0 +1,134 @@
+"""Grammar / wording review using a local LLM exposed by Ollama.
+
+Communication with Ollama is done with the standard-library :mod:`urllib`
+module to avoid pulling in an extra HTTP client dependency. The endpoint,
+model name and timeout are supplied by the caller (typically from settings).
+"""
+
+import json
+import urllib.error
+import urllib.request
+
+
+class TextReviewer:
+    """Calls an Ollama ``/api/generate`` endpoint to review Chinese text."""
+
+    def __init__(self, base_url: str, model: str, timeout: int = 60, config: dict = None, api_key: str = ""):
+        # Normalise the base URL and append the generate path.
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.timeout = timeout
+        self.config = config or {}
+        self.api_key = api_key
+
+    def _build_prompt(self, text: str) -> tuple:
+        """Compose the (system, prompt) pair from the review config."""
+        system = self.config.get("system_prompt", "")
+        user_template = self.config.get("user_template", "{text}")
+        output_format = self.config.get("output_format", "")
+        prompt = user_template.replace("{text}", text)
+        if output_format:
+            prompt = prompt + "\n\n" + output_format
+        return system, prompt
+
+    def _generate(self, system: str, prompt: str) -> dict:
+        """Send a single generate request to Ollama and return a result dict.
+
+        The returned dict always contains ``model`` and ``reachable``. On
+        success ``suggestions`` holds the model output; on failure ``error``
+        describes what went wrong and ``suggestions`` is empty.
+        """
+        payload = {
+            "model": self.model,
+            "prompt": prompt,
+            "system": system,
+            "stream": False,
+            "options": {
+                "temperature": self.config.get("temperature", 0.3),
+                "num_predict": self.config.get("max_tokens", 2048),
+            },
+        }
+        url = self.base_url + "/api/generate"
+        data = json.dumps(payload).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            suggestions = body.get("response", "")
+            return {
+                "model": self.model,
+                "reachable": True,
+                "suggestions": suggestions,
+                "error": None,
+            }
+        except urllib.error.URLError as exc:
+            return {
+                "model": self.model,
+                "reachable": False,
+                "suggestions": "",
+                "error": f"Ollama unreachable: {exc.reason if hasattr(exc, 'reason') else str(exc)}",
+            }
+        except Exception as exc:  # noqa: BLE001 - surface any failure to the caller
+            return {
+                "model": self.model,
+                "reachable": False,
+                "suggestions": "",
+                "error": str(exc),
+            }
+
+    def review(self, text: str) -> dict:
+        """Review ``text`` and return a result dict (see :meth:`_generate`)."""
+        system, prompt = self._build_prompt(text)
+        return self._generate(system, prompt)
+
+    def summarize(self, context: dict) -> dict:
+        """Produce a consolidated final suggestion from aggregated findings.
+
+        ``context`` maps placeholder names (without braces) to values that are
+        substituted into the ``summary_prompt`` template, e.g.
+        ``{"corrected_text": ..., "typos": ..., "sensitive": ..., "review": ...}``.
+        Falls back to an error result when no ``summary_prompt`` is configured.
+        """
+        template = self.config.get("summary_prompt")
+        if not template:
+            return {
+                "model": self.model,
+                "reachable": False,
+                "suggestions": "",
+                "error": "summary_prompt is not configured",
+            }
+        prompt = template
+        for key, value in context.items():
+            prompt = prompt.replace("{" + key + "}", str(value))
+        system = self.config.get("system_prompt", "")
+        return self._generate(system, prompt)
+
+    def is_reachable(self) -> bool:
+        """Probe the Ollama endpoint with a tiny request."""
+        probe = {
+            "model": self.model,
+            "prompt": "ping",
+            "stream": False,
+            "options": {"num_predict": 1},
+        }
+        url = self.base_url + "/api/generate"
+        data = json.dumps(probe).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        req = urllib.request.Request(
+            url, data=data, headers=headers, method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                return resp.status == 200
+        except Exception:  # noqa: BLE001
+            return False

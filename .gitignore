@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+.env
+
+# The 390MB correction model lives in the build context but is NOT committed.
+models/
+
+# Runtime data directory (mounted volume). Seeded on first boot.
+data/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Local env overrides (committed template is example.env)
+.env
+
+# Runtime data directory (mounted volume) + startup cache of discovered dictionaries
+data/
+*.cache/
+
+.workbuddy/
+

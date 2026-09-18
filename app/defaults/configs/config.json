@@ -1,0 +1,23 @@
+{
+  "corrector": {
+    "model": "shibing624/macbert4csc-base-chinese"
+  },
+  "sensitive": {
+    "remote_base": "https://cdn.jsdelivr.net/gh/konsheng/Sensitive-lexicon@master/Vocabulary/",
+    "auto_discover": true,
+    "case_insensitive": false
+  },
+  "review": {
+    "model": "qwen3.5:9b",
+    "base_url": "http://host.docker.internal:11434",
+    "timeout": 120,
+    "system_prompt": "你是一名专业的中文审校助手。请检查用户提供的文本，找出其中的错别字、语法错误、标点误用以及不通顺的表达，并给出具体的修改建议。",
+    "user_template": "请审校以下文本：\n\n{text}",
+    "output_format": "请用中文回答，按以下结构输出：\n1. 问题列表：每条包含【问题】、【位置】、【修改建议】；\n2. 最后给出一段优化后的完整文本。",
+    "summary_prompt": "下面是一段经过错别字矫正与敏感词检查后的文本，以及自动审校意见。请综合所有信息，给出最终的、可执行的修改建议，并附上一份优化后的完整文本。\n\n【已矫正文本】\n{corrected_text}\n\n【发现的错别字】\n{typos}\n\n【命中的敏感词】\n{sensitive}\n\n【自动审校意见】\n{review}",
+    "temperature": 0.3,
+    "max_tokens": 2048,
+    "require_json": false,
+    "enable_summary": true
+  }
+}

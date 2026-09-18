@@ -1,0 +1,14 @@
+# Keep the build context lean. NOTE: `models/` is intentionally NOT ignored
+# because the Dockerfile copies the baked-in correction model from it.
+.git
+.gitignore
+.dockerignore
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv
+env
+tests
+data
+*.md

@@ -1,0 +1,22 @@
+services:
+  correct-cn:
+    build: .
+    image: correct-cn:latest
+    container_name: correct-cn
+    ports:
+      - "8000:8000"
+    environment:
+      # Directory inside the container that holds config + sensitive dictionaries.
+      - DATA_DIR=/data
+      # Point this at your Ollama instance. On Docker Desktop for Windows/Mac,
+      # `host.docker.internal` reaches the Ollama running on the host.
+      # On Linux hosts add `--add-host=host.docker.internal:host-gateway`
+      # to the `docker run` command, or reference another compose service.
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - OLLAMA_MODEL=qwen3.5:9b
+      - OLLAMA_TIMEOUT=120
+      - OLLAMA_API_KEY=
+    volumes:
+      # Persist user config + dictionaries across container restarts.
+      - ./data:/data
+    restart: unless-stopped
