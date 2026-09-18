@@ -65,7 +65,18 @@ class TextReviewer:
         logger.info("Ollama request: model=%s url=%s prompt_len=%d", self.model, url, len(prompt))
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
+                raw = resp.read().decode("utf-8")
+            logger.info("Ollama raw response (first 500 chars): %s", raw[:500])
+            body = json.loads(raw)
+            # Ollama may return HTTP 200 but include an error in the body.
+            if "error" in body:
+                logger.error("Ollama returned error in body: model=%s error=%s", self.model, body["error"])
+                return {
+                    "model": self.model,
+                    "reachable": False,
+                    "suggestions": "",
+                    "error": body["error"],
+                }
             suggestions = body.get("response", "")
             logger.info("Ollama response: model=%s response_len=%d", self.model, len(suggestions))
             if not suggestions:
@@ -75,6 +86,20 @@ class TextReviewer:
                 "reachable": True,
                 "suggestions": suggestions,
                 "error": None,
+            }
+        except urllib.error.HTTPError as exc:
+            body_text = ""
+            try:
+                body_text = exc.read().decode("utf-8", errors="replace")
+            except Exception:  # noqa: BLE001
+                pass
+            error_msg = f"Ollama HTTP {exc.code}: {body_text[:500]}"
+            logger.error("Ollama request failed: model=%s url=%s %s", self.model, url, error_msg)
+            return {
+                "model": self.model,
+                "reachable": False,
+                "suggestions": "",
+                "error": error_msg,
             }
         except urllib.error.URLError as exc:
             error_msg = f"Ollama unreachable: {exc.reason if hasattr(exc, 'reason') else str(exc)}"
