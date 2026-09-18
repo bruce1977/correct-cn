@@ -78,6 +78,12 @@ class TextReviewer:
                     "error": body["error"],
                 }
             suggestions = body.get("response", "")
+            # Thinking models (e.g. qwen3.5) output reasoning in "thinking" field
+            # and the final answer in "response". If response is empty, fall back
+            # to thinking content so the caller still gets useful output.
+            if not suggestions and body.get("thinking"):
+                logger.info("Response empty, falling back to thinking field (len=%d)", len(body["thinking"]))
+                suggestions = body["thinking"]
             logger.info("Ollama response: model=%s response_len=%d", self.model, len(suggestions))
             if not suggestions:
                 logger.warning("Ollama returned empty response. Raw body keys: %s", list(body.keys()))

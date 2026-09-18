@@ -54,30 +54,41 @@ DEFAULT_CONFIG = {
     "review": {
         "model": "qwen3.5:9b",
         "base_url": "http://host.docker.internal:11434",
-        "timeout": 120,
+        "timeout": 300,
         "system_prompt": (
-            "你是一名专业的中文审校助手。请检查用户提供的文本，"
+            "你是一名专业的中文审校助手。你的任务是仔细检查用户提供的文本，"
             "找出其中的错别字、语法错误、标点误用以及不通顺的表达，"
-            "并给出具体的修改建议。"
+            "并给出具体的修改建议。\n\n"
+            "重要规则：\n"
+            "1. 你必须输出内容，不能返回空结果。\n"
+            "2. 即使文本没有问题，你也必须明确说明「未发现明显问题，文本质量良好」。\n"
+            "3. 回答必须使用中文。"
         ),
-        "user_template": "请审校以下文本：\n\n{text}",
+        "user_template": "请审校以下文本，找出错别字、语法错误、标点误用和不通顺的表达：\n\n{text}",
         "output_format": (
-            "请用中文回答，按以下结构输出：\n"
-            "1. 问题列表：每条包含【问题】、【位置】、【修改建议】；\n"
-            "2. 最后给出一段优化后的完整文本。"
+            "请按以下结构回答：\n\n"
+            "【审校结果】\n"
+            "1. 问题列表（如无问题则写「无」）：\n"
+            "- 问题：xxx\n"
+            "  位置：xxx\n"
+            "  修改建议：xxx\n\n"
+            "2. 综合评价：\n"
+            "（总结文本整体质量，即使没有问题也要给出评价）"
         ),
         # Template used by the pipeline's optional second (summary) LLM call.
         # Placeholders: {corrected_text}, {typos}, {sensitive}, {review}.
         "summary_prompt": (
             "下面是一段经过错别字矫正与敏感词检查后的文本，以及自动审校意见。"
             "请综合所有信息，给出最终的、可执行的修改建议，并附上一份优化后的完整文本。\n\n"
+            "重要规则：你必须输出内容，不能返回空结果。\n\n"
             "【已矫正文本】\n{corrected_text}\n\n"
             "【发现的错别字】\n{typos}\n\n"
             "【命中的敏感词】\n{sensitive}\n\n"
             "【自动审校意见】\n{review}"
         ),
         "temperature": 0.3,
-        "max_tokens": 2048,
+        "num_ctx": 8192,
+        "max_tokens": 4096,
         "require_json": False,
         # Whether the pipeline makes a second LLM call to produce the final,
         # consolidated suggestion (True) or simply reuses the review result
