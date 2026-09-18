@@ -96,7 +96,7 @@ def _seed_data_dir(data_dir: str) -> None:
     # Unified configuration file (corrector / sensitive / review nodes).
     dst_cfg = Path(data_dir) / "config.json"
     if not dst_cfg.exists():
-        src_cfg = DEFAULTS_DIR / "configs" / "config.json"
+        src_cfg = DEFAULTS_DIR / "config.json"
         if src_cfg.is_file():
             shutil.copy2(src_cfg, dst_cfg)
         else:
@@ -229,24 +229,11 @@ def require_api_key(
 
 
 # --------------------------------------------------------------------------- #
-# Health (open)
+# Health (open, no API key required)
 # --------------------------------------------------------------------------- #
-@app.get("/health", response_model=HealthResponse, tags=["System"])
+@app.get("/health", tags=["System"])
 def health():
-    cfg = app.state.config
-    s: Settings = app.state.settings
-    engine: SensitiveEngine = app.state.sensitive_engine
-    reviewer: TextReviewer = app.state.reviewer
-    return HealthResponse(
-        status="ok" if app.state.corrector else "degraded",
-        corrector_model=cfg["corrector"]["model"],
-        corrector_mode=cfg["corrector"].get("mode", "model"),
-        ollama_model=cfg["review"]["model"],
-        ollama_base_url=cfg["review"]["base_url"],
-        ollama_reachable=reviewer.is_reachable(),
-        categories_loaded=len(engine.get_categories()),
-        sensitive_word_count=engine.get_word_count(),
-    )
+    return {}
 
 
 # --------------------------------------------------------------------------- #
@@ -370,22 +357,3 @@ def keys_reload():
     s: Settings = app.state.settings
     app.state.api_keys = _load_api_keys(s.api_keys_file)
     return {"loaded": len(app.state.api_keys)}
-
-
-@app.get("/")
-def root():
-    return {
-        "service": "correct-cn",
-        "version": "1.1.0",
-        "auth_required": bool(app.state.api_keys),
-        "endpoints": [
-            "/health",
-            "/api/correct",
-            "/api/sensitive/check",
-            "/api/sensitive/dictionaries",
-            "/api/sensitive/refresh",
-            "/api/review",
-            "/api/pipeline",
-            "/api/keys/reload",
-        ],
-    }

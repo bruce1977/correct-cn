@@ -2,44 +2,13 @@
 
 > 服务地址：`http://localhost:8000`  
 > 认证方式：`Authorization: Bearer <api_key>` 或 `X-API-Key: <api_key>`  
-> 当 `data/keys.txt` 为空时，API 无需认证
+> 除 `/health` 外，所有 API 端点都需要 API Key 认证
 
 ---
 
-## 1. GET / - 根路径
+## 1. GET /health - 健康检查
 
-**描述：** 返回服务基本信息和可用端点列表。
-
-**请求：**
-```http
-GET / HTTP/1.1
-Host: localhost:8000
-```
-
-**预期响应：**
-```json
-{
-  "service": "correct-cn",
-  "version": "1.1.0",
-  "auth_required": false,
-  "endpoints": [
-    "/health",
-    "/api/correct",
-    "/api/sensitive/check",
-    "/api/sensitive/dictionaries",
-    "/api/sensitive/refresh",
-    "/api/review",
-    "/api/pipeline",
-    "/api/keys/reload"
-  ]
-}
-```
-
----
-
-## 2. GET /health - 健康检查
-
-**描述：** 返回服务运行状态和各组件可用性。
+**描述：** 仅供判断系统状态使用，无需认证。
 
 **请求：**
 ```http
@@ -47,39 +16,16 @@ GET /health HTTP/1.1
 Host: localhost:8000
 ```
 
-**预期响应（正常模式）：**
+**预期响应：**
 ```json
-{
-  "status": "ok",
-  "corrector_model": "shibing624/macbert4csc-base-chinese",
-  "corrector_mode": "model",
-  "ollama_model": "qwen3.5:9b",
-  "ollama_base_url": "http://host.docker.internal:11434",
-  "ollama_reachable": true,
-  "categories_loaded": 15,
-  "sensitive_word_count": 3500
-}
-```
-
-**预期响应（降级模式，corrector 加载失败）：**
-```json
-{
-  "status": "degraded",
-  "corrector_model": "shibing624/macbert4csc-base-chinese",
-  "corrector_mode": "mock",
-  "ollama_model": "qwen3.5:9b",
-  "ollama_base_url": "http://host.docker.internal:11434",
-  "ollama_reachable": false,
-  "categories_loaded": 15,
-  "sensitive_word_count": 3500
-}
+{}
 ```
 
 ---
 
-## 3. POST /api/correct - 文本纠错
+## 2. POST /api/correct - 文本纠错
 
-**描述：** 对输入文本进行错别字矫正，返回纠正结果和位置信息。
+**描述：** 对输入文本进行错别字矫正，返回纠正结果和位置信息。需要 API Key 认证。
 
 **请求：**
 ```http
@@ -168,9 +114,9 @@ Content-Type: application/json
 
 ---
 
-## 4. POST /api/sensitive/check - 敏感词检测
+## 3. POST /api/sensitive/check - 敏感词检测
 
-**描述：** 扫描文本中的敏感词，返回命中结果。
+**描述：** 扫描文本中的敏感词，返回命中结果。需要 API Key 认证。
 
 **请求：**
 ```http
