@@ -324,8 +324,12 @@ def sensitive_refresh(req: SensitiveRefreshRequest):
 @app.post("/api/review", response_model=ReviewResponse, dependencies=[Depends(require_api_key)], tags=["Review"])
 def review(req: ReviewRequest):
     reviewer: TextReviewer = app.state.reviewer
-    result = reviewer.review(req.text)
-    logger.info("Review endpoint: suggestions_len=%d, error=%s", len(result.get("suggestions", "")), result.get("error"))
+    result = reviewer.review(
+        req.text,
+        typos=req.typos,
+        sensitive_hits=req.sensitive_hits,
+    )
+    logger.info("Review endpoint: issues_count=%d, error=%s", len(result.get("issues", [])), result.get("error"))
     return ReviewResponse(**result)
 
 
@@ -344,15 +348,18 @@ def pipeline(req: PipelineRequest):
             status_code=503,
             detail=f"Correction model unavailable: {app.state.corrector_error}",
         )
-    result = app.state.pipeline.run(req.text, enable_summary=req.enable_summary)
+    result = app.state.pipeline.run(
+        req.text,
+        enable_audit=req.enable_audit,
+        enable_final_suggestion=req.enable_final_suggestion,
+    )
     return PipelineResponse(
         original=result["original"],
         corrected_text=result["corrected_text"],
         has_issues=result["has_issues"],
         typos=result["typos"],
         sensitive_words=result["sensitive_words"],
-        review=ReviewResponse(**result["review"]),
-        summary=(ReviewResponse(**result["summary"]) if result["summary"] else None),
+        issues=result["issues"],
         final_suggestion=result["final_suggestion"],
     )
 

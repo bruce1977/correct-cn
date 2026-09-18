@@ -96,6 +96,26 @@ class ReviewRequest(BaseModel):
     """Request body for the review endpoint."""
 
     text: str = Field(..., description="Text to be reviewed.")
+    typos: Optional[List[ErrorLocation]] = Field(
+        None, description="Typos detected by Step 1 (corrector)."
+    )
+    sensitive_hits: Optional[List[SensitiveHit]] = Field(
+        None, description="Sensitive words detected by Step 2."
+    )
+
+
+class Issue(BaseModel):
+    """A single validated issue from the review."""
+
+    type: str = Field(..., description="'typo' or 'sensitive'.")
+    original: Optional[str] = Field(None, description="Original text (for typo).")
+    corrected: Optional[str] = Field(None, description="Corrected text (for typo).")
+    word: Optional[str] = Field(None, description="Sensitive word (for sensitive).")
+    category: Optional[str] = Field(None, description="Category (for sensitive).")
+    line: int = Field(..., description="1-based line number.")
+    start: int = Field(..., description="0-based start index.")
+    end: int = Field(..., description="0-based exclusive end index.")
+    suggestion: str = Field("", description="Review suggestion for this issue.")
 
 
 class ReviewResponse(BaseModel):
@@ -103,7 +123,7 @@ class ReviewResponse(BaseModel):
 
     model: str
     reachable: bool = Field(..., description="Whether the Ollama endpoint answered.")
-    suggestions: str = Field("", description="Model output / review suggestions.")
+    issues: List[Issue] = Field(default_factory=list, description="Validated issues.")
     error: Optional[str] = Field(None, description="Error detail if the call failed.")
 
 
@@ -114,11 +134,19 @@ class PipelineRequest(BaseModel):
     """Request body for the combined pipeline endpoint."""
 
     text: str = Field(..., description="Text to process end-to-end.")
-    enable_summary: Optional[bool] = Field(
+    enable_audit: Optional[bool] = Field(
         None,
         description=(
-            "Force or disable the final summary LLM call. None (default) falls "
-            "back to the config.json -> review.enable_summary setting."
+            "Enable the audit step (Step 4) to re-validate review suggestions. "
+            "None (default) falls back to config.json -> review.enable_audit."
+        ),
+    )
+    enable_final_suggestion: Optional[bool] = Field(
+        None,
+        description=(
+            "Enable final text generation (Step 5). When true, generates the "
+            "corrected text based on confirmed issues. "
+            "None (default) falls back to config.json -> review.enable_final_suggestion."
         ),
     )
 
@@ -133,15 +161,14 @@ class PipelineResponse(BaseModel):
     )
     typos: List[ErrorLocation]
     sensitive_words: List[SensitiveHit]
-    review: ReviewResponse
-    summary: Optional[ReviewResponse] = Field(
-        None,
-        description=(
-            "Result of the optional final summary LLM call. None when "
-            "enable_summary is False or the model was unreachable."
-        ),
+    issues: List[Issue] = Field(
+        default_factory=list,
+        description="Validated issues with suggestions.",
     )
-    final_suggestion: str
+    final_suggestion: Optional[str] = Field(
+        None,
+        description="Final corrected text (only when enable_final_suggestion=true).",
+    )
 
 
 # --------------------------------------------------------------------------- #

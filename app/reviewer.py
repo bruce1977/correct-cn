@@ -7,8 +7,11 @@ model name and timeout are supplied by the caller (typically from settings).
 
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
+
+from app.schemas import Issue
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +130,143 @@ class TextReviewer:
                 "error": str(exc),
             }
 
+    def _parse_issues_from_response(
+        self,
+        response_text: str,
+        typos: list,
+        sensitive_hits: list,
+    ) -> list:
+        """Parse LLM response into structured Issue objects.
+
+        This is a best-effort parser that tries to extract validated issues
+        from the LLM's free-form response. It matches findings against the
+        original typos and sensitive_hits to preserve position information.
+        """
+        issues = []
+
+        # Process typos
+        for typo in typos:
+            suggestion = self._extract_typo_suggestion(response_text, typo)
+            issues.append(Issue(
+                type="typo",
+                original=typo.original,
+                corrected=typo.corrected,
+                line=typo.line,
+                start=typo.start,
+                end=typo.end,
+                suggestion=suggestion,
+            ))
+
+        # Process sensitive words
+        for hit in sensitive_hits:
+            suggestion = self._extract_sensitive_suggestion(response_text, hit)
+            issues.append(Issue(
+                type="sensitive",
+                word=hit.word,
+                category=hit.category,
+                line=hit.line,
+                start=hit.start,
+                end=hit.end,
+                suggestion=suggestion,
+            ))
+
+        return issues
+
+    def _extract_typo_suggestion(self, response_text: str, typo) -> str:
+        """Extract the suggestion for a typo from the LLM response."""
+        # Look for patterns indicating the typo is not an error
+        # Try to find the typo word in the response and check surrounding context
+        word = typo.original
+
+        # Find all occurrences of the word in the response
+        for match in re.finditer(re.escape(word), response_text):
+            start_pos = match.start()
+            # Look at context before and after (up to 100 chars each)
+            context_before = response_text[max(0, start_pos - 100):start_pos]
+            context_after = response_text[start_pos + len(word):min(len(response_text), start_pos + len(word) + 100)]
+            context = context_before + word + context_after
+
+            # Check for non-error patterns in the surrounding context
+            non_error_indicators = [
+                "非错误", "不是错误", "非错别字", "不是错别字",
+                "用法正确", "无需修改", "不需要修改", "正确用法",
+                "正常使用", "常规用法", "可接受",
+            ]
+            for indicator in non_error_indicators:
+                if indicator in context:
+                    # Extract reason if present
+                    reason_match = re.search(r"原因[：:]\s*(.+?)(?:[。；\n]|$)", context)
+                    reason = reason_match.group(1).strip() if reason_match else ""
+                    if reason:
+                        return f"经验证，「{word}」在上下文中用法正确（{reason}）"
+                    return f"经验证，「{word}」在上下文中用法正确"
+
+            # Check for confirmation patterns
+            confirm_indicators = [
+                "确认修改", "需要修改", "建议修改", "应改为",
+                "→", "修改为", "改为",
+            ]
+            for indicator in confirm_indicators:
+                if indicator in context:
+                    # Try to extract the suggestion
+                    suggestion_match = re.search(
+                        rf"「?{re.escape(word)}」?\s*(?:→|修改为|改为|建议修改为?)\s*[「」]?([^」\n,，。]+)",
+                        context,
+                    )
+                    if suggestion_match:
+                        return f"确认修改: {suggestion_match.group(1).strip()}"
+                    return "确认修改"
+
+        # Default: if no specific pattern found, return generic message
+        return "确认修改"
+
+    def _extract_sensitive_suggestion(self, response_text: str, hit) -> str:
+        """Extract the suggestion for a sensitive word from the LLM response."""
+        word = hit.word
+
+        # Find all occurrences of the word in the response
+        for match in re.finditer(re.escape(word), response_text):
+            start_pos = match.start()
+            # Look at context before and after (up to 150 chars each)
+            context_before = response_text[max(0, start_pos - 150):start_pos]
+            context_after = response_text[start_pos + len(word):min(len(response_text), start_pos + len(word) + 150)]
+            context = context_before + word + context_after
+
+            # Check for non-sensitive patterns in the surrounding context
+            non_sensitive_indicators = [
+                "非敏感", "不是敏感词", "正常用法", "无需处理",
+                "不需要处理", "正常使用", "常规用法", "可接受",
+                "合理使用", "恰当使用", "语境中正常",
+                "上下文中正常", "非违规",
+            ]
+            for indicator in non_sensitive_indicators:
+                if indicator in context:
+                    # Extract reason if present
+                    reason_match = re.search(r"原因[：:]\s*(.+?)(?:[。；\n]|$)", context)
+                    reason = reason_match.group(1).strip() if reason_match else ""
+                    if reason:
+                        return f"经验证，「{word}」在上下文中是正常用法（{reason}）"
+                    return f"经验证，「{word}」在上下文中是正常用法"
+
+            # Check for confirmation patterns (word IS sensitive)
+            confirm_indicators = [
+                "确认敏感", "敏感词", "需要处理", "建议处理",
+                "应删除", "建议删除", "需删除", "需替换",
+            ]
+            for indicator in confirm_indicators:
+                if indicator in context:
+                    # Try to extract the suggestion
+                    suggestion_match = re.search(
+                        rf"「?{re.escape(word)}」?\s*(?:建议|应|需|需要)\s*(.+?)(?:[。；\n]|$)",
+                        context,
+                    )
+                    if suggestion_match:
+                        return f"确认敏感词: {suggestion_match.group(1).strip()}"
+                    return "确认敏感词，需根据上下文处理"
+
+        # Default: if no specific pattern found, return generic message
+        return "需根据上下文判断"
+
     def review(
         self,
         text: str,
@@ -134,11 +274,11 @@ class TextReviewer:
         typos: list = None,
         sensitive_hits: list = None,
     ) -> dict:
-        """Review ``text`` and return a result dict (see :meth:`_generate`).
+        """Review ``text`` and return a result dict with structured issues.
 
         When ``original_text`` / ``typos`` / ``sensitive_hits`` are provided the
-        prompt includes the full correction context so the LLM can make an
-        informed recommendation.
+        prompt includes the full correction context so the LLM can validate
+        the findings.
         """
         system, prompt = self._build_prompt(text)
         # Enrich the prompt with pipeline context when available.
@@ -153,31 +293,133 @@ class TextReviewer:
             if sensitive_hits:
                 hit_lines = [f"- {h.word}（{h.category}，第{h.line}行）" for h in sensitive_hits]
                 context_parts.append("\n\n【命中的敏感词】\n" + "\n".join(hit_lines))
-            context_parts.append("\n\n请基于以上信息，判断是否需要进一步修改，并给出审校意见。")
+            context_parts.append("\n\n请结合全文语境，逐条验证以上发现是否属实，并给出审校意见。")
             prompt = prompt + "".join(context_parts)
-        return self._generate(system, prompt)
 
-    def summarize(self, context: dict) -> dict:
-        """Produce a consolidated final suggestion from aggregated findings.
+        result = self._generate(system, prompt)
 
-        ``context`` maps placeholder names (without braces) to values that are
-        substituted into the ``summary_prompt`` template, e.g.
-        ``{"corrected_text": ..., "typos": ..., "sensitive": ..., "review": ...}``.
-        Falls back to an error result when no ``summary_prompt`` is configured.
+        # Parse the response into structured issues
+        if result["reachable"] and (typos or sensitive_hits):
+            issues = self._parse_issues_from_response(
+                result["suggestions"], typos or [], sensitive_hits or []
+            )
+            result["issues"] = issues
+        else:
+            result["issues"] = []
+
+        return result
+
+    def audit(self, issues: list, original_text: str) -> dict:
+        """Re-validate each issue's suggestion via a second LLM call.
+
+        Returns a result dict with ``audit_suggestions`` mapping issue
+        indices to their audit results.
         """
-        template = self.config.get("summary_prompt")
+        template = self.config.get("audit_prompt")
         if not template:
             return {
                 "model": self.model,
                 "reachable": False,
-                "suggestions": "",
-                "error": "summary_prompt is not configured",
+                "audit_suggestions": {},
+                "error": "audit_prompt is not configured",
             }
+
+        # Build the issue list for the prompt
+        issue_lines = []
+        for i, issue in enumerate(issues):
+            if issue.type == "typo":
+                issue_lines.append(
+                    f"{i+1}. 错别字：「{issue.original}」→「{issue.corrected}」"
+                    f"（第{issue.line}行，位置{issue.start}-{issue.end}）"
+                    f" 建议：{issue.suggestion}"
+                )
+            else:
+                issue_lines.append(
+                    f"{i+1}. 敏感词：「{issue.word}」（{issue.category}）"
+                    f"（第{issue.line}行，位置{issue.start}-{issue.end}）"
+                    f" 建议：{issue.suggestion}"
+                )
+
         prompt = template
-        for key, value in context.items():
-            prompt = prompt.replace("{" + key + "}", str(value))
+        prompt = prompt.replace("{issues}", "\n".join(issue_lines))
+        prompt = prompt.replace("{original_text}", original_text)
+
         system = self.config.get("system_prompt", "")
-        return self._generate(system, prompt)
+        result = self._generate(system, prompt)
+
+        # Parse audit suggestions from response
+        audit_suggestions = {}
+        if result["reachable"]:
+            for i, issue in enumerate(issues):
+                # Simple heuristic: look for the issue number and confirmation
+                pattern = f"{i+1}[.、].*(?:确认|保留|需要修改)"
+                if re.search(pattern, result["suggestions"]):
+                    audit_suggestions[i] = issue.suggestion
+                else:
+                    # Check for rejection patterns
+                    reject_pattern = f"{i+1}[.、].*(?:非错误|非敏感|无需修改|不需要)"
+                    if re.search(reject_pattern, result["suggestions"]):
+                        audit_suggestions[i] = f"经复核，此条无需修改"
+                    else:
+                        audit_suggestions[i] = issue.suggestion
+
+        result["audit_suggestions"] = audit_suggestions
+        return result
+
+    def generate_final_text(
+        self, original_text: str, issues: list
+    ) -> dict:
+        """Generate the final corrected text based on confirmed issues.
+
+        Returns a result dict with ``final_text`` containing the corrected text.
+        """
+        template = self.config.get("final_prompt")
+        if not template:
+            return {
+                "model": self.model,
+                "reachable": False,
+                "final_text": original_text,
+                "error": "final_prompt is not configured",
+            }
+
+        # Build the confirmed issues list
+        issue_lines = []
+        for i, issue in enumerate(issues):
+            if issue.type == "typo":
+                issue_lines.append(
+                    f"- 第{issue.line}行，位置{issue.start}-{issue.end}："
+                    f"「{issue.original}」→「{issue.corrected}」"
+                )
+            else:
+                issue_lines.append(
+                    f"- 第{issue.line}行，位置{issue.start}-{issue.end}："
+                    f"敏感词「{issue.word}」（{issue.category}）需处理"
+                )
+
+        prompt = template
+        prompt = prompt.replace("{original_text}", original_text)
+        prompt = prompt.replace("{issues}", "\n".join(issue_lines) if issue_lines else "无")
+
+        system = self.config.get("system_prompt", "")
+        result = self._generate(system, prompt)
+
+        # Extract final text from response
+        if result["reachable"]:
+            # Try to extract text between markers or use the full response
+            text_match = re.search(
+                r"(?:修改后的文本|最终文本|完整文本)[：:]\s*\n(.*?)(?:\n\n|\Z)",
+                result["suggestions"],
+                re.DOTALL,
+            )
+            if text_match:
+                result["final_text"] = text_match.group(1).strip()
+            else:
+                # Use the full response as the final text
+                result["final_text"] = result["suggestions"]
+        else:
+            result["final_text"] = original_text
+
+        return result
 
     def is_reachable(self) -> bool:
         """Probe the Ollama endpoint with a tiny request."""

@@ -182,14 +182,16 @@ nodes. Every value can be overridden by an environment variable / `.env` entry.
     "model": "qwen3.5:9b",
     "base_url": "http://host.docker.internal:11434",
     "timeout": 120,
-    "system_prompt": "你是一名专业的中文审校助手……",
-    "user_template": "请审校以下文本：\n\n{text}",
-    "output_format": "请用中文回答，按以下结构输出……",
-    "summary_prompt": "综合{review}给出最终修改建议……（占位符：{corrected_text} {typos} {sensitive} {review}）",
+    "system_prompt": "You are a Chinese proofreading assistant...",
+    "user_template": "Please validate the following text and detection results:\n\n---\n{text}\n---",
+    "output_format": "Please respond in the following structure:\n\n【Typo Validation】...",
+    "audit_prompt": "Please validate each suggestion in the following list...",
+    "final_prompt": "Please generate the corrected text based on confirmed issues...",
     "temperature": 0.3,
     "max_tokens": 2048,
     "require_json": false,
-    "enable_summary": true
+    "enable_review": false,
+    "enable_final_suggestion": false
   }
 }
 ```
@@ -198,11 +200,13 @@ nodes. Every value can be overridden by an environment variable / `.env` entry.
 - `sensitive.auto_discover` — when true, refresh targets the files found on disk.
 - `sensitive.case_insensitive` — lower-case dictionary + text before matching.
 - `review.*` — Ollama model/base/timeout, prompts, sampling params.
-- `review.enable_summary` — when true, the pipeline makes a **second** LLM call to
-  consolidate the findings into the final suggestion; when false it reuses the
-  review text directly.
-- `review.summary_prompt` — template for that second call. Placeholders:
-  `{corrected_text}`, `{typos}`, `{sensitive}`, `{review}`.
+- `review.enable_audit` — when true, the pipeline validates the review results
+  again (Step 4); when false, this step is skipped.
+- `review.enable_final_suggestion` — when true, the pipeline generates the final
+  corrected text based on all confirmed issues (Step 5); when false, this step
+  is skipped.
+- `review.audit_prompt` — prompt template for the audit validation step.
+- `review.final_prompt` — prompt template for generating the final text.
 
 `{text}` in `user_template` is replaced with the input text at request time.
 
@@ -299,42 +303,144 @@ Omit `categories` to scan all loaded categories.
 ### `POST /api/review`
 ```jsonc
 // request
-{ "text": "他跑的很快，因为我慢。" }
+{ "text": "你号，这里有一个炸弹" }
 // response
 {
   "model": "qwen3.5:9b",
   "reachable": true,
-  "suggestions": "……（模型给出的审校意见）",
+  "issues": [
+    {
+      "type": "typo",
+      "original": "你号",
+      "corrected": "你好",
+      "line": 1,
+      "start": 0,
+      "end": 2,
+      "suggestion": "Typo, recommend correction"
+    },
+    {
+      "type": "sensitive",
+      "word": "炸弹",
+      "category": "violence",
+      "line": 1,
+      "start": 7,
+      "end": 9,
+      "suggestion": "Sensitive word, check context"
+    }
+  ],
   "error": null
 }
 ```
 
 ### `POST /api/pipeline`
 Runs correction and sensitive check **concurrently**, then passes both results to
-the review step, which may optionally make a second (summary) LLM call.
+the review step, which validates the findings. Optional audit and final text
+generation steps are available.
 
-- The first two steps (correction + sensitive scan) run in parallel via a thread
-  pool; the sensitive scan operates on the **original** text.
-- `has_issues` is `true` when any typo or sensitive word was found.
-- `enable_summary` (request parameter) decides whether a second LLM call
-  consolidates everything into `final_suggestion`. `null` (default) uses the
-  `config.json -> review.enable_summary` setting.
-- When `enable_summary` is false (or the model is unreachable), `final_suggestion`
-  reuses the review text and `summary` is `null`.
+#### Pipeline Workflow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      Input Text                             │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+          ┌───────────┴───────────┐
+          │                       │
+          ▼                       ▼
+┌─────────────────┐     ┌─────────────────┐
+│  Step 1: Typo   │     │  Step 2: Sensitive│
+│  Correction     │     │  Word Detection  │
+│  (MacBert)      │     │  (Aho-Corasick)  │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         │  Concurrent (ThreadPool) │
+         └───────────┬───────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Step 3: Review (LLM)                                       │
+│  - Validate typos from Step 1                               │
+│  - Validate sensitive words from Step 2                     │
+│  - Output: issues list with suggestions                     │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼  enable_review=true?
+        ┌─────────────┴─────────────┐
+        │ Yes                       │ No
+        ▼                           │
+┌─────────────────────────────┐     │
+│  Step 4: Audit (LLM)        │     │
+│  - Re-validate each issue's │     │
+│    suggestion from Step 3   │     │
+│  - Output: audit_suggestion │     │
+└─────────────┬───────────────┘     │
+              │                     │
+              └──────────┬──────────┘
+                         │
+                         ▼  enable_final_suggestion=true?
+           ┌─────────────┴─────────────┐
+           │ Yes                       │ No
+           ▼                           │
+┌─────────────────────────────┐        │
+│  Step 5: Final Text (LLM)   │        │
+│  - Generate corrected text  │        │
+│    based on confirmed issues│        │
+│  - Output: final_suggestion │        │
+└─────────────┬───────────────┘        │
+              │                        │
+              └──────────┬─────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Output                                 │
+│  - original: input text                                     │
+│  - corrected_text: Step 1 corrected text                    │
+│  - issues: validated issue list with suggestions            │
+│  - final_suggestion: final corrected text (optional)        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Key Design Points
+
+- **Steps 1-2 run concurrently**: correction and sensitive scanning are independent,
+  processed in parallel via thread pool for efficiency.
+- **Step 3's core responsibility**: NOT finding new issues, but **validating** whether
+  the findings from Steps 1-2 are genuine.
+  - Sensitive words must be judged in context (e.g., "炸弹" may be normal in military news)
+  - Typos need confirmation (e.g., "的地得" usage depends on context)
+- **Step 4 (optional)**: Re-validates Step 3's judgments for increased reliability.
+- **Step 5 (optional)**: Generates the final corrected text based on all confirmed issues.
+
+#### Request Parameters
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `text` | string | (required) | Text to process |
+| `enable_audit` | bool | null | Enable audit step (Step 4). null uses config.json setting |
+| `enable_final_suggestion` | bool | null | Enable final text generation (Step 5). null uses config.json setting |
+
+#### Response Structure
 
 ```jsonc
-// request
-{ "text": "你号，这里有一个炸弹", "enable_summary": true }
-// response
 {
-  "original": "你号，这里有一个炸弹",
-  "corrected_text": "你好，这里有一个炸弹",
+  "original": "input text",
+  "corrected_text": "Step 1 corrected text",
   "has_issues": true,
-  "typos": [ { "line": 1, "start": 0, "end": 2, "original": "你号", "corrected": "你好" } ],
-  "sensitive_words": [ { "word": "炸弹", "category": "violence", "line": 1, "start": 7, "end": 9 } ],
-  "review": { "model": "qwen3.5:9b", "reachable": true, "suggestions": "……", "error": null },
-  "summary": { "model": "qwen3.5:9b", "reachable": true, "suggestions": "……", "error": null },
-  "final_suggestion": "……"
+  "typos": [/* typo list */],
+  "sensitive_words": [/* sensitive word list */],
+  "issues": [
+    {
+      "type": "typo",
+      "original": "你号",
+      "corrected": "你好",
+      "line": 1,
+      "start": 0,
+      "end": 2,
+      "suggestion": "Confirmed correction",
+      "audit_suggestion": "Confirmed correction"  // only when enable_review=true
+    }
+  ],
+  "final_suggestion": "final corrected text"  // only when enable_final_suggestion=true
 }
 ```
 
@@ -373,10 +479,16 @@ pytest -q
   scan in parallel via `ThreadPoolExecutor`; the scan operates on the original text
   so it has no dependency on the (slower) correction step. Both results are then
   handed to the review step together.
-- **Per-request summary toggle.** Whether the pipeline makes a second LLM call to
-  produce the consolidated `final_suggestion` is chosen per request with
-  `enable_summary` (falling back to `review.enable_summary` in config). When off,
-  the review text is reused and no extra model call is made.
+- **Review validates, not finds.** Step 3's core responsibility is validating whether
+  the findings from Steps 1-2 are genuine, not finding new issues. Sensitive words
+  must be judged in context (e.g., "炸弹" may be normal in military news).
+- **Optional audit step.** Whether the pipeline re-validates the review results is
+  controlled by `enable_audit`. When off, Step 3's results are used directly;
+  when on, it adds reliability at the cost of an extra LLM call.
+- **Optional final text generation.** Whether the pipeline generates the final
+  corrected text is controlled by `enable_final_suggestion`. When off, no final
+  text is generated; when on, it produces the complete corrected text based on
+  all confirmed issues.
 - **Graceful degradation.** If the correction model fails to load,
   `/api/correct` and `/api/pipeline` return HTTP 503 instead of crashing; the
   sensitive-word and review endpoints keep working.

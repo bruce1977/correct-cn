@@ -12,13 +12,12 @@ class TextPipeline:
         1. :class:`TextCorrector` fixes typos and returns the corrected text.
         2. :class:`SensitiveEngine` scans the *original* text for sensitive words.
            Steps 1 and 2 run concurrently (see :meth:`run`).
-        3. :class:`TextReviewer` asks a local LLM for an overall review of the
-           corrected text, given the findings from steps 1-2.
-        4. (Optional) A second LLM call consolidates everything into the final
-           modification suggestion. Controlled by the ``enable_summary`` argument
-           (request parameter), falling back to the ``review_config`` default.
-           When disabled, or when the model is unreachable, the review text is
-           reused as the final suggestion.
+        3. :class:`TextReviewer` asks a local LLM to validate the findings from
+           steps 1-2, returning structured issues with suggestions.
+        4. (Optional) A second LLM call re-validates each issue's suggestion
+           when ``enable_review`` is True.
+        5. (Optional) A third LLM call generates the final corrected text when
+           ``enable_final_suggestion`` is True.
     """
 
     def __init__(self, corrector, sensitive_engine, reviewer, review_config=None):
@@ -27,13 +26,21 @@ class TextPipeline:
         self.reviewer = reviewer
         self.review_config = review_config or {}
 
-    def run(self, text: str, enable_summary: bool = None) -> dict:
+    def run(
+        self,
+        text: str,
+        enable_audit: bool = None,
+        enable_final_suggestion: bool = None,
+    ) -> dict:
         """Run the full pipeline over ``text`` and return an aggregated result.
 
         Args:
             text: the input text to process.
-            enable_summary: force/disable the final summary LLM call. ``None``
-                (default) falls back to ``review_config["enable_summary"]``.
+            enable_audit: force/disable the audit step (Step 4). ``None``
+                (default) falls back to ``review_config["enable_audit"]``.
+            enable_final_suggestion: force/disable final text generation
+                (Step 5). ``None`` falls back to
+                ``review_config["enable_final_suggestion"]``.
         """
         # Steps 1 & 2 run concurrently: correction and sensitive-word scanning
         # are independent when the scan operates on the original text.
@@ -55,28 +62,29 @@ class TextPipeline:
             sensitive_hits=sensitive_hits,
         )
 
-        # Step 4: optional consolidated summary call.
-        if enable_summary is None:
-            enable_summary = self.review_config.get("enable_summary", True)
-        summary = None
-        if enable_summary:
-            summary = self.reviewer.summarize(
-                {
-                    "corrected_text": corrected_text,
-                    "typos": "\n".join(
-                        f"- {t.original} -> {t.corrected}" for t in typos
-                    )
-                    or "（无）",
-                    "sensitive": "\n".join(
-                        f"- {h.word}（{h.category}）" for h in sensitive_hits
-                    )
-                    or "（无）",
-                    "review": review.get("suggestions") or "（无）",
-                }
+        issues = review.get("issues", [])
+
+        # Step 4: optional audit (re-validate suggestions).
+        if enable_audit is None:
+            enable_audit = self.review_config.get("enable_audit", False)
+        if enable_audit and issues:
+            audit_result = self.reviewer.audit(issues, text)
+            audit_suggestions = audit_result.get("audit_suggestions", {})
+            # Apply audit suggestions to issues
+            for idx, suggestion in audit_suggestions.items():
+                if idx < len(issues):
+                    issues[idx].suggestion = suggestion
+            review["audit"] = audit_result
+
+        # Step 5: optional final text generation.
+        if enable_final_suggestion is None:
+            enable_final_suggestion = self.review_config.get(
+                "enable_final_suggestion", False
             )
-            final_suggestion = summary.get("suggestions") or review.get("suggestions", "")
-        else:
-            final_suggestion = review.get("suggestions", "")
+        final_suggestion = None
+        if enable_final_suggestion:
+            final_result = self.reviewer.generate_final_text(text, issues)
+            final_suggestion = final_result.get("final_text", text)
 
         # Whether the input has any detectable problem.
         has_issues = bool(typos) or bool(sensitive_hits)
@@ -87,7 +95,6 @@ class TextPipeline:
             "has_issues": has_issues,
             "typos": typos,
             "sensitive_words": sensitive_hits,
-            "review": review,
-            "summary": summary,
+            "issues": issues,
             "final_suggestion": final_suggestion,
         }

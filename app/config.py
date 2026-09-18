@@ -56,44 +56,71 @@ DEFAULT_CONFIG = {
         "base_url": "http://host.docker.internal:11434",
         "timeout": 300,
         "system_prompt": (
-            "你是一名专业的中文审校助手。你的任务是仔细检查用户提供的文本，"
-            "找出其中的错别字、语法错误、标点误用以及不通顺的表达，"
-            "并给出具体的修改建议。\n\n"
-            "重要规则：\n"
-            "1. 你必须输出内容，不能返回空结果。\n"
-            "2. 即使文本没有问题，你也必须明确说明「未发现明显问题，文本质量良好」。\n"
-            "3. 回答必须使用中文。"
+            "你是一名中文审校助手。自动检测工具（错别字检查、敏感词扫描）会产出疑似问题，"
+            "但会产生大量误报。你的职责是用逻辑和上下文推断这些发现是否合理，"
+            "过滤掉误报，只保留真正需要修改的问题。\n\n"
+            "判断原则：\n"
+            "1. 只验证已发现的问题，不要自行寻找新问题。\n"
+            "2. 敏感词判断：同一个词在不同语境下可能敏感也可能不敏感。\n"
+            "   例如「炸弹」在新闻报道中是正常提及（非敏感），在描述购买行为时才是敏感。\n"
+            "   判断依据是该词在当前语境中是否有实际危害性。\n"
+            "3. 错别字判断：自动纠错可能误判，如果该词在语境中用法正确，则标记为「非错误」。\n"
+            "4. 不要给出文笔优化建议，只报告确认存在的问题。\n"
+            "5. 回答必须使用中文。"
         ),
-        "user_template": "以下是要审校的文本内容（直接审校，不要分析用户意图）：\n\n---\n{text}\n---",
+        "user_template": (
+            "以下是要审校的文本及自动检测结果，请逐条验证：\n\n"
+            "---\n{text}\n---"
+        ),
         "output_format": (
-            "请按以下结构回答：\n\n"
-            "【审校结果】\n"
-            "1. 问题列表（如无问题则写「无」）：\n"
-            "- 问题：xxx\n"
-            "  位置：xxx\n"
-            "  修改建议：xxx\n\n"
-            "2. 综合评价：\n"
-            "（总结文本整体质量，即使没有问题也要给出评价）"
+            "请按以下格式逐条验证（每条验证结果占一行）：\n\n"
+            "【错别字验证】\n"
+            "1.「你号」→确认修改：建议改为「你好」\n"
+            "2.「的地得」→非错误：在上下文中用法正确\n\n"
+            "【敏感词验证】\n"
+            "（同一词在不同上下文中可能敏感也可能不敏感，需结合前后文判断）\n"
+            "1.「炸弹」→非敏感：新闻报道语境，正常提及\n"
+            "2.「炸弹」→确认敏感：描述购买行为，需删除\n"
+            "3.「枪支」→非敏感：博物馆展览语境，正常描述\n"
+            "4.「枪支」→确认敏感：描述非法持有，需处理\n\n"
+            "【需保留的修改】\n"
+            "（只列出确认需要修改的问题，每条一行）"
         ),
-        # Template used by the pipeline's optional second (summary) LLM call.
-        # Placeholders: {corrected_text}, {typos}, {sensitive}, {review}.
-        "summary_prompt": (
-            "下面是一段经过错别字矫正与敏感词检查后的文本，以及自动审校意见。"
-            "请综合所有信息，给出最终的、可执行的修改建议，并附上一份优化后的完整文本。\n\n"
-            "重要规则：你必须输出内容，不能返回空结果。\n\n"
-            "【已矫正文本】\n{corrected_text}\n\n"
-            "【发现的错别字】\n{typos}\n\n"
-            "【命中的敏感词】\n{sensitive}\n\n"
-            "【自动审校意见】\n{review}"
+        # Template used by the pipeline's optional audit (Step 4) LLM call.
+        # Placeholders: {issues}, {original_text}.
+        "audit_prompt": (
+            "请根据以下修改建议列表，逐条验证是否确实需要修改。\n"
+            "对于每条建议，给出「确认」或「非错误/非敏感」的判断。\n\n"
+            "重要规则：\n"
+            "1. 只验证已有建议，不要添加新的修改建议。\n"
+            "2. 敏感词必须结合上下文判断。\n\n"
+            "【修改建议列表】\n{issues}\n\n"
+            "【原始文本】\n{original_text}\n\n"
+            "请逐条验证，格式：\n"
+            "1. [确认/非错误] 原因：xxx"
+        ),
+        # Template used by the pipeline's optional final text generation (Step 5).
+        # Placeholders: {original_text}, {issues}.
+        "final_prompt": (
+            "请根据以下确认的修改建议，生成修改后的完整文本。\n"
+            "只应用确认需要修改的问题，不要进行文笔优化。\n\n"
+            "重要规则：\n"
+            "1. 保持原文结构和风格不变。\n"
+            "2. 只修改确认需要修改的部分。\n\n"
+            "【原始文本】\n{original_text}\n\n"
+            "【确认的修改建议】\n{issues}\n\n"
+            "请输出修改后的完整文本："
         ),
         "temperature": 0.3,
         "num_ctx": 8192,
         "max_tokens": 4096,
         "require_json": False,
-        # Whether the pipeline makes a second LLM call to produce the final,
-        # consolidated suggestion (True) or simply reuses the review result
-        # (False). Disabling avoids an extra model call when Ollama is slow.
-        "enable_summary": True,
+        # Whether the pipeline makes a second LLM call to re-validate review
+        # suggestions (audit step). Disabling avoids an extra model call.
+        "enable_audit": False,
+        # Whether the pipeline makes a third LLM call to generate the final
+        # corrected text. Disabling avoids an extra model call.
+        "enable_final_suggestion": False,
     },
 }
 

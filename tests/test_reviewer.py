@@ -52,40 +52,6 @@ def test_prompt_building_and_parsing(monkeypatch):
     assert sent["data"]["options"]["temperature"] == 0.2
 
 
-def test_summarize_substitutes_placeholders(monkeypatch):
-    cfg = {
-        "system_prompt": "SYS",
-        "summary_prompt": "文本：{corrected_text}\n问题：{typos}\n敏感：{sensitive}\n意见：{review}",
-    }
-    reviewer = TextReviewer("http://ollama:11434", "qwen3.5:9b", 30, cfg)
-
-    sent = {}
-
-    def _fake_urlopen(req, timeout=None):
-        sent["data"] = json.loads(req.data.decode("utf-8"))
-        return _fake_response({"response": "最终建议"})
-
-    monkeypatch.setattr("app.reviewer.urllib.request.urlopen", _fake_urlopen)
-
-    result = reviewer.summarize(
-        {
-            "corrected_text": "你好",
-            "typos": "- 你号 -> 你好",
-            "sensitive": "- 炸弹（violence）",
-            "review": "整体建议",
-        }
-    )
-    assert result["reachable"] is True
-    assert result["suggestions"] == "最终建议"
-    # All four placeholders must be substituted in the outgoing prompt.
-    prompt = sent["data"]["prompt"]
-    assert "你好" in prompt
-    assert "你号 -> 你好" in prompt
-    assert "炸弹（violence）" in prompt
-    assert "整体建议" in prompt
-    assert "{corrected_text}" not in prompt  # placeholder fully replaced
-
-
 def test_unreachable_returns_error(monkeypatch):
     import urllib.error
 

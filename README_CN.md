@@ -10,7 +10,8 @@
 3. **语法/错别字初级复核** —— 调用本地大模型（Ollama，如 `qwen3.5:9b` / `qwen3.5:4b`），
    提示词与输出格式可通过配置文件灵活定制。
 4. **完整流程** —— 串联 错别字检查 → 敏感词检查 → 文字复核，返回综合修改意见，
-   并带有 `has_issues` 标记，以及可选的「二次大模型总结」步骤（由请求参数控制）。
+   并带有 `has_issues` 标记。可选的「复核」步骤对复核结果再做一遍验证，
+   可选的「最终修改建议」步骤生成修改后的完整文本。
 
 所有代码注释均使用英文。依赖尽可能精简：仅 `fastapi`、`uvicorn`、`pydantic`
 和 `pycorrector`（后者会引入 torch / transformers）。敏感词引擎与 Ollama 客户端
@@ -172,14 +173,16 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
     "model": "qwen3.5:9b",
     "base_url": "http://host.docker.internal:11434",
     "timeout": 120,
-    "system_prompt": "你是一名专业的中文审校助手……",
-    "user_template": "请审校以下文本：\n\n{text}",
-    "output_format": "请用中文回答，按以下结构输出……",
-    "summary_prompt": "综合{review}给出最终修改建议……（占位符：{corrected_text} {typos} {sensitive} {review}）",
+    "system_prompt": "你是一名中文审校助手……",
+    "user_template": "以下是要审校的文本及自动检测结果，请逐条验证：\n\n---\n{text}\n---",
+    "output_format": "请按以下结构回答：\n\n【错别字验证】\n- 原文「xxx」→ 建议「xxx」（确认/非错误，原因：xxx）\n\n【敏感词验证】\n- 「xxx」（分类：xxx）→ 确认敏感/非敏感（原因：xxx）\n\n【需保留的修改】\n（只列出确认需要修改的问题，每条一行）",
+    "audit_prompt": "请根据以下修改建议列表，逐条验证是否确实需要修改……",
+    "final_prompt": "请根据以下确认的修改建议，生成修改后的完整文本……",
     "temperature": 0.3,
     "max_tokens": 2048,
     "require_json": false,
-    "enable_summary": true
+    "enable_review": false,
+    "enable_final_suggestion": false
   }
 }
 ```
@@ -188,10 +191,12 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 - `sensitive.auto_discover` —— 为 `true` 时，刷新操作针对磁盘上发现的文件。
 - `sensitive.case_insensitive` —— 匹配前对词库与文本统一小写。
 - `review.*` —— Ollama 模型/地址/超时、提示词、采样参数。
-- `review.enable_summary` —— 为 `true` 时，pipeline 会**再调用一次**大模型，
-  将所有发现汇总为最终修改建议；为 `false` 时直接复用复核结果。
-- `review.summary_prompt` —— 第二次调用的模板，占位符：`{corrected_text}`、
-  `{typos}`、`{sensitive}`、`{review}`。
+- `review.enable_audit` —— 为 `true` 时，pipeline 会对复核结果再做一遍验证
+  （Step 4），为 `false` 时跳过此步骤。
+- `review.enable_final_suggestion` —— 为 `true` 时，pipeline 会根据所有确认的
+  修改建议生成最终的修改后文本（Step 5），为 `false` 时跳过此步骤。
+- `review.audit_prompt` —— 复核验证的提示词模板。
+- `review.final_prompt` —— 生成最终文本的提示词模板。
 
 `user_template` 中的 `{text}` 会在请求时被替换为输入文本。
 
@@ -285,40 +290,140 @@ curl -X POST http://localhost:8000/api/keys/reload
 ### `POST /api/review`
 ```jsonc
 // 请求
-{ "text": "他跑的很快，因为我慢。" }
+{ "text": "你号，这里有一个炸弹" }
 // 响应
 {
   "model": "qwen3.5:9b",
   "reachable": true,
-  "suggestions": "……（模型给出的审校意见）",
+  "issues": [
+    {
+      "type": "typo",
+      "original": "你号",
+      "corrected": "你好",
+      "line": 1,
+      "start": 0,
+      "end": 2,
+      "suggestion": "错别字，建议修改"
+    },
+    {
+      "type": "sensitive",
+      "word": "炸弹",
+      "category": "violence",
+      "line": 1,
+      "start": 7,
+      "end": 9,
+      "suggestion": "敏感词，需根据上下文判断"
+    }
+  ],
   "error": null
 }
 ```
 
 ### `POST /api/pipeline`
 **并发**执行 错别字检查 与 敏感词检查，再把两者结果一起交给复核步骤；
-复核后可选择再调用一次大模型做汇总。
+可选的「复核」和「最终修改建议」步骤。
 
-- 前两步（纠错 + 敏感词扫描）通过线程池并行执行，敏感词扫描基于**原始文本**。
-- 发现任意错别字或敏感词时 `has_issues` 为 `true`。
-- `enable_summary`（请求参数）决定是否再调用一次大模型，将结果汇总为
-  `final_suggestion`；`null`（默认）使用 `config.json -> review.enable_summary` 设置。
-- 当 `enable_summary` 为 `false`（或模型不可达）时，`final_suggestion` 复用复核文本，
-  `summary` 为 `null`。
+#### Pipeline 工作流程
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      输入文本                                │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+          ┌───────────┴───────────┐
+          │                       │
+          ▼                       ▼
+┌─────────────────┐     ┌─────────────────┐
+│  Step 1: 纠错   │     │  Step 2: 敏感词  │
+│  (MacBert)      │     │  (Aho-Corasick) │
+└────────┬────────┘     └────────┬────────┘
+         │                       │
+         │  并发执行 (ThreadPool) │
+         └───────────┬───────────┘
+                     │
+                     ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Step 3: 复核 (LLM)                                         │
+│  - 验证 Step 1 发现的错别字是否属实                           │
+│  - 验证 Step 2 发现的敏感词是否真正敏感                       │
+│  - 输出: issues 列表 (每个 issue 带 suggestion)              │
+└─────────────────────┬───────────────────────────────────────┘
+                      │
+                      ▼  enable_review=true?
+        ┌─────────────┴─────────────┐
+        │ 是                        │ 否
+        ▼                           │
+┌─────────────────────────────┐     │
+│  Step 4: 复核验证 (LLM)     │     │
+│  - 对 Step 3 的每个 issue   │     │
+│    的 suggestion 再次验证    │     │
+│  - 输出: audit_suggestion   │     │
+└─────────────┬───────────────┘     │
+              │                     │
+              └──────────┬──────────┘
+                         │
+                         ▼  enable_final_suggestion=true?
+           ┌─────────────┴─────────────┐
+           │ 是                        │ 否
+           ▼                           │
+┌─────────────────────────────┐        │
+│  Step 5: 生成最终文本 (LLM)  │        │
+│  - 根据所有确认的修改建议    │        │
+│  - 生成修改后的完整文本      │        │
+│  - 输出: final_suggestion   │        │
+└─────────────┬───────────────┘        │
+              │                        │
+              └──────────┬─────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      输出结果                                │
+│  - original: 原始文本                                        │
+│  - corrected_text: Step 1 纠错后的文本                       │
+│  - issues: 复核后的修改建议列表                               │
+│  - final_suggestion: 最终修改后的完整文本 (可选)              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### 关键设计说明
+
+- **Step 1-2 并发执行**：纠错和敏感词扫描相互独立，通过线程池并行处理，提高效率
+- **Step 3 的核心职责**：不是寻找新问题，而是**验证** Step 1-2 的发现是否属实
+  - 敏感词必须结合上下文判断（如"炸弹"在军事新闻中可能是正常用法）
+  - 错别字要确认是否真的写错（如"的地得"的使用需结合语境）
+- **Step 4 (可选)**：对 Step 3 的判断再做一遍验证，增加可靠性
+- **Step 5 (可选)**：根据所有确认的修改建议，生成最终的修改后文本
+
+#### 请求参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `text` | string | (必填) | 要处理的文本 |
+| `enable_audit` | bool | null | 是否启用复核验证步骤（Step 4）。null 时使用 config.json 设置 |
+| `enable_final_suggestion` | bool | null | 是否生成最终修改文本（Step 5）。null 时使用 config.json 设置 |
+
+#### 响应结构
 
 ```jsonc
-// 请求
-{ "text": "你号，这里有一个炸弹", "enable_summary": true }
-// 响应
 {
-  "original": "你号，这里有一个炸弹",
-  "corrected_text": "你好，这里有一个炸弹",
+  "original": "原始文本",
+  "corrected_text": "Step 1 纠错后的文本",
   "has_issues": true,
-  "typos": [ { "line": 1, "start": 0, "end": 2, "original": "你号", "corrected": "你好" } ],
-  "sensitive_words": [ { "word": "炸弹", "category": "violence", "line": 1, "start": 7, "end": 9 } ],
-  "review": { "model": "qwen3.5:9b", "reachable": true, "suggestions": "……", "error": null },
-  "summary": { "model": "qwen3.5:9b", "reachable": true, "suggestions": "……", "error": null },
-  "final_suggestion": "……"
+  "typos": [/* 错别字列表 */],
+  "sensitive_words": [/* 敏感词列表 */],
+  "issues": [
+    {
+      "type": "typo",
+      "original": "你号",
+      "corrected": "你好",
+      "line": 1,
+      "start": 0,
+      "end": 2,
+      "suggestion": "确认修改",
+      "audit_suggestion": "确认修改"  // 仅 enable_review=true 时存在
+    }
+  ],
+  "final_suggestion": "修改后的完整文本"  // 仅 enable_final_suggestion=true 时存在
 }
 ```
 
@@ -350,8 +455,11 @@ pytest -q
   （以及离线测试）无需 torch 即可运行。
 - **前两步并发**：`TextPipeline` 用 `ThreadPoolExecutor` 并行执行纠错与敏感词扫描；
   扫描基于原始文本，因此不依赖（更慢的）纠错步骤。两步结果随后一起交给复核步骤。
-- **按请求切换二次总结**：pipeline 是否再调用一次大模型生成汇总的 `final_suggestion`，
-  由请求参数 `enable_summary` 决定（默认回退到 `review.enable_summary`）。关闭时复用复核
-  文本，不再发起额外模型调用。
+- **复核的核心职责是验证**：Step 3 不是寻找新问题，而是验证 Step 1-2 的发现是否属实。
+  特别是敏感词需要结合上下文判断（如"炸弹"在军事新闻中可能是正常用法）。
+- **可选的复核验证**：pipeline 是否对复核结果再做一遍验证由 `enable_audit` 控制。
+  关闭时直接使用 Step 3 的结果，开启时增加可靠性但多一次 LLM 调用。
+- **可选的最终文本生成**：pipeline 是否生成修改后的完整文本由 `enable_final_suggestion` 控制。
+  关闭时不生成最终文本，开启时根据所有确认的修改建议生成完整文本。
 - **优雅降级**：若纠错模型加载失败，`/api/correct` 与 `/api/pipeline` 返回 HTTP 503
   而非崩溃；敏感词与复核接口仍可正常工作。
