@@ -242,8 +242,7 @@ class TextReviewer:
         self.model = model
         self.timeout = timeout
         self.config = config or {}
-        # An explicit argument wins, then the config key (which the env vars
-        # OLLAMA_API_KEY / FINAL_API_KEY are merged into per step node).
+        # An explicit argument wins, then the config key (which the OLLAMA_API_KEY
         self.api_key = api_key or self.config.get("api_key", "") or ""
         self.protocol = normalize_protocol(self.config.get("protocol", PROTOCOL_OLLAMA))
         # Retry on transient failures (connection error / timeout / 5xx / 429).

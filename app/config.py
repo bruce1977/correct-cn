@@ -45,14 +45,13 @@ from dataclasses import dataclass, field
 
 ENV_DEFAULTS = {
     "DATA_DIR": "/data",
-    # --- Single LLM default set. Fills the transport fields of review / audit /
-    # final ONLY when config.json leaves them empty. protocol: "ollama" -> native
-    # POST /api/generate; "openai" -> OpenAI-compatible POST /v1/chat/completions.
-    "LLM_PROTOCOL": "ollama",
-    "LLM_BASE_URL": "http://localhost:11434",
-    "LLM_MODEL": "qwen3.5:9b",
-    "LLM_API_KEY": "",  # Bearer token for an external (openai) provider
-    "LLM_TIMEOUT": "300",
+    # --- OLLAMA_* fills review + audit transport fields ONLY when config.json
+    # leaves them empty. The final node (Step 5) has NO env var fallback.
+    "OLLAMA_PROTOCOL": "ollama",
+    "OLLAMA_BASE_URL": "http://localhost:11434",
+    "OLLAMA_MODEL": "qwen3.5:9b",
+    "OLLAMA_API_KEY": "",
+    "OLLAMA_TIMEOUT": "300",
     # --- Corrector (MacBert) ---
     "CORRECTOR_MODEL": "shibing624/macbert4csc-base-chinese",
     "CORRECTOR_MODE": "model",  # "model" | "mock"
@@ -95,7 +94,7 @@ DEFAULT_CONFIG = {
         "base_url": "http://host.docker.internal:11434",
         "timeout": 300,
         # Bearer token for the endpoint. Required by most external providers,
-        # ignored by a local Ollama. Env: OLLAMA_API_KEY (or FINAL_API_KEY).
+        # ignored by a local Ollama. Env: OLLAMA_API_KEY.
         "api_key": "",
         # review 的核心职责：复核工具性检查（错别字 / 敏感词）的结果。
         # 工具脱离语境，必有 误报（把正确判为错误）与 漏报（漏掉真实问题）。
@@ -264,11 +263,11 @@ class Settings:
     data_dir: str = field(default=ENV_DEFAULTS["DATA_DIR"])
     corrector_model: str = field(default=ENV_DEFAULTS["CORRECTOR_MODEL"])
     corrector_mode: str = field(default=ENV_DEFAULTS["CORRECTOR_MODE"])
-    llm_protocol: str = field(default=ENV_DEFAULTS["LLM_PROTOCOL"])
-    llm_base_url: str = field(default=ENV_DEFAULTS["LLM_BASE_URL"])
-    llm_model: str = field(default=ENV_DEFAULTS["LLM_MODEL"])
-    llm_api_key: str = field(default="")
-    llm_timeout: int = field(default=300)
+    ollama_protocol: str = field(default=ENV_DEFAULTS["OLLAMA_PROTOCOL"])
+    ollama_base_url: str = field(default=ENV_DEFAULTS["OLLAMA_BASE_URL"])
+    ollama_model: str = field(default=ENV_DEFAULTS["OLLAMA_MODEL"])
+    ollama_api_key: str = field(default="")
+    ollama_timeout: int = field(default=300)
     sensitive_remote_base: str = field(default=ENV_DEFAULTS["SENSITIVE_REMOTE_BASE"])
     config_path: str = field(default=None)
     api_keys_file: str = field(default=None)
@@ -288,11 +287,11 @@ class Settings:
             data_dir=get("DATA_DIR"),
             corrector_model=get("CORRECTOR_MODEL"),
             corrector_mode=get("CORRECTOR_MODE"),
-            llm_protocol=get("LLM_PROTOCOL"),
-            llm_base_url=get("LLM_BASE_URL"),
-            llm_model=get("LLM_MODEL"),
-            llm_api_key=os.environ.get("LLM_API_KEY", ""),
-            llm_timeout=int(get("LLM_TIMEOUT")),
+            ollama_protocol=get("OLLAMA_PROTOCOL"),
+            ollama_base_url=get("OLLAMA_BASE_URL"),
+            ollama_model=get("OLLAMA_MODEL"),
+            ollama_api_key=os.environ.get("OLLAMA_API_KEY", ""),
+            ollama_timeout=int(get("OLLAMA_TIMEOUT")),
             sensitive_remote_base=get("SENSITIVE_REMOTE_BASE"),
             config_path=os.environ.get("CONFIG_PATH") or None,
             api_keys_file=os.environ.get("API_KEYS_FILE")
@@ -351,9 +350,9 @@ def load_config(settings: Settings) -> dict:
     cfg = _deep_merge(DEFAULT_CONFIG, raw_file)
 
     # Env fallback: applied only to fields config.json left empty/unspecified.
-    # Precedence (lowest -> highest): built-in defaults < config.json <
-    #   OLLAMA_* (shared local model for review + audit) < FINAL_* (Step 5
-    #   external override) < LLM_* (legacy catch-all).
+    # OLLAMA_* is the only env var set: it fills review + audit transport fields
+    # (shared local model). The final node (Step 5) has NO env var fallback —
+    # if you need a different provider for final, set it in config.json.
     #
     # Each row is (node, field, env_var).
     _OLLAMA_FALLBACKS = [
@@ -367,30 +366,6 @@ def load_config(settings: Settings) -> dict:
         ("audit", "model", "OLLAMA_MODEL"),
         ("audit", "api_key", "OLLAMA_API_KEY"),
         ("audit", "timeout", "OLLAMA_TIMEOUT"),
-    ]
-    _FINAL_FALLBACKS = [
-        ("final", "protocol", "FINAL_PROTOCOL"),
-        ("final", "base_url", "FINAL_BASE_URL"),
-        ("final", "model", "FINAL_MODEL"),
-        ("final", "api_key", "FINAL_API_KEY"),
-        ("final", "timeout", "FINAL_TIMEOUT"),
-    ]
-    _LLM_FALLBACKS = [
-        ("review", "protocol", "LLM_PROTOCOL"),
-        ("review", "base_url", "LLM_BASE_URL"),
-        ("review", "model", "LLM_MODEL"),
-        ("review", "api_key", "LLM_API_KEY"),
-        ("review", "timeout", "LLM_TIMEOUT"),
-        ("audit", "protocol", "LLM_PROTOCOL"),
-        ("audit", "base_url", "LLM_BASE_URL"),
-        ("audit", "model", "LLM_MODEL"),
-        ("audit", "api_key", "LLM_API_KEY"),
-        ("audit", "timeout", "LLM_TIMEOUT"),
-        ("final", "protocol", "LLM_PROTOCOL"),
-        ("final", "base_url", "LLM_BASE_URL"),
-        ("final", "model", "LLM_MODEL"),
-        ("final", "api_key", "LLM_API_KEY"),
-        ("final", "timeout", "LLM_TIMEOUT"),
     ]
 
     def _apply_fallbacks(fallback_list):
@@ -425,11 +400,7 @@ def load_config(settings: Settings) -> dict:
         if envval and not (raw_file.get(node) or {}).get(field):
             cfg.setdefault(node, {})[field] = envval
 
-    # 1. OLLAMA_* fills shared local model for review + audit.
+    # OLLAMA_* fills shared local model for review + audit.
     _apply_fallbacks(_OLLAMA_FALLBACKS)
-    # 2. FINAL_* overrides the final node (Step 5 external provider).
-    _apply_fallbacks(_FINAL_FALLBACKS)
-    # 3. Legacy LLM_* catch-all (ignored when OLLAMA_*/FINAL_* already set).
-    _apply_fallbacks(_LLM_FALLBACKS)
 
     return cfg

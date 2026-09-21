@@ -1,9 +1,11 @@
-"""Tests for config loading: 5-node layout + cleaned-up env variables.
+"""Tests for config loading: 5-node layout + OLLAMA_* env fallback.
 
-Covers the two env mechanisms:
-  * ``OLLAMA_*`` fill empty transport fields on review/audit/final (shared local model).
-  * ``FINAL_*`` override the ``final`` node (Step 5 external provider).
-And confirms the old generic ``LLM_*`` aliases are gone (no silent effect).
+Covers:
+  * ``OLLAMA_*`` fills empty transport fields on review/audit (shared local model).
+  * The final node (Step 5) has NO env var fallback — its fields must come from
+    config.json or built-in defaults.
+  * Confirms the old generic ``LLM_*`` / ``FINAL_*`` aliases are gone (no silent
+    effect).
 """
 
 import json
@@ -23,7 +25,10 @@ def test_load_config_fills_local_and_overrides_final(monkeypatch, tmp_path):
         "sensitive": {},
         "review": {"protocol": "ollama"},
         "audit": {"enabled": False},
-        "final": {"enabled": True, "protocol": "openai"},
+        # final is explicitly configured in config.json (no env var fallback).
+        "final": {"enabled": True, "protocol": "openai",
+                  "base_url": "https://api.deepseek.com",
+                  "model": "deepseek-chat", "api_key": "sk-final"},
     })
     settings = Settings(data_dir=str(tmp_path), config_path=str(cfg_file))
 
@@ -31,13 +36,9 @@ def test_load_config_fills_local_and_overrides_final(monkeypatch, tmp_path):
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama:11434")
     monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:9b")
     monkeypatch.setenv("OLLAMA_API_KEY", "sk-local")
-    # External FINAL override (Step 5).
-    monkeypatch.setenv("FINAL_BASE_URL", "https://api.deepseek.com")
-    monkeypatch.setenv("FINAL_MODEL", "deepseek-chat")
-    monkeypatch.setenv("FINAL_PROTOCOL", "openai")
-    monkeypatch.setenv("FINAL_API_KEY", "sk-final")
-    # Legacy generic alias must be ignored after the cleanup.
-    monkeypatch.setenv("LLM_BASE_URL", "http://should-be-ignored")
+    # Old aliases must be ignored.
+    monkeypatch.setenv("FINAL_BASE_URL", "http://should-be-ignored-final")
+    monkeypatch.setenv("LLM_BASE_URL", "http://should-be-ignored-llm")
 
     cfg = load_config(settings)
 
@@ -48,19 +49,17 @@ def test_load_config_fills_local_and_overrides_final(monkeypatch, tmp_path):
     assert cfg["audit"]["base_url"] == "http://ollama:11434"
     assert cfg["audit"]["model"] == "qwen3.5:9b"
 
-    # final is overridden by FINAL_* (external provider).
+    # final comes from config.json; FINAL_* / LLM_* must NOT leak.
     assert cfg["final"]["base_url"] == "https://api.deepseek.com"
     assert cfg["final"]["model"] == "deepseek-chat"
     assert cfg["final"]["protocol"] == "openai"
     assert cfg["final"]["api_key"] == "sk-final"
-
-    # The legacy LLM_* alias leaks nowhere.
-    assert "should-be-ignored" not in cfg["review"]["base_url"]
     assert "should-be-ignored" not in cfg["final"]["base_url"]
+    assert "should-be-ignored" not in cfg["review"]["base_url"]
 
 
 def test_load_config_local_settings_dont_overwrite_explicit_final(monkeypatch, tmp_path):
-    """An explicit final.base_url in config.json survives OLLAMA_* but yields to FINAL_*."""
+    """An explicit final.base_url in config.json survives OLLAMA_*."""
     cfg_file = tmp_path / "config.json"
     _write_config(cfg_file, {
         "review": {"protocol": "ollama"},
@@ -72,7 +71,6 @@ def test_load_config_local_settings_dont_overwrite_explicit_final(monkeypatch, t
 
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://ollama:11434")
     monkeypatch.setenv("OLLAMA_MODEL", "qwen3.5:9b")
-    # No FINAL_* set this time.
 
     cfg = load_config(settings)
     # OLLAMA_* must NOT clobber the explicit external final endpoint.

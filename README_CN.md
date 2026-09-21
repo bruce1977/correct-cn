@@ -173,7 +173,7 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 各自带有 `protocol` / `base_url` / `model` / `api_key`，因此不同步骤可用不同
 服务商（例如复核 / 二次校验用本地 Ollama 省钱，最终修复用更强的外部模型）。
 **环境变量只是一套默认值**：仅当 `config.json` 把某字段留空时，对应的环境变量
-（`OLLAMA_*` / `FINAL_*` / `LLM_*`，或 `CORRECTOR_*` / `SENSITIVE_*`）才兜底
+（`OLLAMA_*`，或 `CORRECTOR_*` / `SENSITIVE_*`）才兜底
 生效；`config.json` 里显式写的值永远优先。
 
 ```json
@@ -368,8 +368,8 @@ vLLM / LM Studio / SGLang / Xinference，以及 Ollama 自带的 `/v1` API。
 | 参数 | 默认 | 调整建议 |
 | ---- | ---- | -------- |
 | `protocol` | `ollama` | 请求格式：`ollama`（原生 `/api/generate`）或 `openai`（任意 OpenAI 兼容 `/v1/chat/completions`）。 |
-| `model` / `base_url` | `qwen3.5:9b` / `...` | 模型与地址。环境变量（config 缺省时的默认值）：review/audit 用 `OLLAMA_MODEL` / `OLLAMA_BASE_URL`；final 用 `FINAL_MODEL` / `FINAL_BASE_URL`。 |
-| `api_key` | `""` | 端点的 Bearer Token；多数外部服务必填。环境变量（默认兜底）：review/audit 用 `OLLAMA_API_KEY`；final 用 `FINAL_API_KEY`。 |
+| `model` / `base_url` | `qwen3.5:9b` / `...` | 模型与地址。环境变量（config 缺省时的默认值）：review/audit 用 `OLLAMA_MODEL` / `OLLAMA_BASE_URL`。 |
+| `api_key` | `""` | 端点的 Bearer Token；多数外部服务必填。环境变量（默认兜底）：review/audit 用 `OLLAMA_API_KEY`。 |
 | `temperature` | `0.2` | 保持低值（0.1–0.3）以求稳定；调高会增加运行间抖动。 |
 | `num_ctx` | `16384` | **上下文窗口**（仅 Ollama），须覆盖「输入 + 输出」。长文本优先调大此项；过小会截断。 |
 | `max_tokens` | `8192` | 输出上限，须大于修复后文本长度，否则 `final_suggestion` 被截断。 |
@@ -397,25 +397,14 @@ vLLM / LM Studio / SGLang / Xinference，以及 Ollama 自带的 `/v1` API。
 | `OLLAMA_MODEL`          | `qwen3.5:9b`                                                                    | review / audit 的默认模型。         |
 | `OLLAMA_TIMEOUT`        | `300`                                                                           | review / audit 的默认单请求超时（秒）。 |
 | `OLLAMA_API_KEY`        | *(空)*                                                                          | review / audit 的 Bearer Token。 |
-| `FINAL_PROTOCOL`        | —                                                                               | final 的默认 `protocol`（Step 5 外部模型）。 |
-| `FINAL_BASE_URL`        | —                                                                               | final 的默认 LLM 地址。             |
-| `FINAL_MODEL`           | —                                                                               | final 的默认模型。                  |
-| `FINAL_TIMEOUT`         | —                                                                               | final 的默认单请求超时（秒）。      |
-| `FINAL_API_KEY`         | —                                                                               | final 的 Bearer Token。            |
-| `LLM_PROTOCOL`          | `ollama`                                                                        | （legacy 兜底）review / audit / final 的默认 `protocol`。 |
-| `LLM_BASE_URL`          | `http://localhost:11434`                                                        | （legacy 兜底）review / audit / final 的默认 LLM 地址。    |
-| `LLM_MODEL`             | `qwen3.5:9b`                                                                    | （legacy 兜底）review / audit / final 的默认模型。         |
-| `LLM_TIMEOUT`           | `300`                                                                           | （legacy 兜底）review / audit / final 的默认单请求超时（秒）。 |
-| `LLM_API_KEY`           | *(空)*                                                                          | （legacy 兜底）外部 provider 的默认 Bearer Token。 |
 | `SENSITIVE_REMOTE_BASE` | `https://cdn.jsdelivr.net/gh/konsheng/Sensitive-lexicon@master/Vocabulary/`     | `/api/sensitive/refresh` 的远程词库源。     |
 | `CONFIG_PATH`           | *(自动解析为 `$DATA_DIR/config.json`)*                                          | 覆盖配置文件路径。                          |
 | `API_KEYS_FILE`         | *(自动解析为 `$DATA_DIR/.keys`)*                                              | API Key 文件（每行一个 key，空则接口开放）。|
 
 > **环境变量只是默认值，不是覆盖。** 每个字段 `config.json` 优先：仅当 `config.json`
-> 把该字段留空时，环境变量才生效。优先级（低→高）：`OLLAMA_*`（review + audit
-> 共享本地模型）< `FINAL_*`（Step 5 外部模型）< `LLM_*`（legacy 兜底）。
-> 想把某一步（如 Step 5）指向别的 provider，在 `config.json` 里写那一步的节点即可，
-> 不必再加更多环境变量。
+> 把该字段留空时，环境变量才生效。`OLLAMA_*` 兜底 review / audit 的传输字段；
+> final（Step 5）如需不同 provider，在 `config.json` 的 final 节点显式写
+> `protocol` / `base_url` / `model` / `api_key` 即可。
 
 ### API Key 鉴权
 

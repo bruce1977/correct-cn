@@ -187,8 +187,8 @@ nodes — `corrector`, `sensitive`, and the three LLM steps `review` / `audit` /
 `final`. Each LLM step carries its own `protocol` / `base_url` / `model` /
 `api_key`, so different steps can use different providers (e.g. the cheap local
 Ollama for review & audit, and a stronger external model for the final repair).
-**Environment variables are a default, not an override:** an `OLLAMA_*` / `FINAL_*` /
-`LLM_*` (or `CORRECTOR_*` / `SENSITIVE_*`) env var only fills a field when `config.json`
+**Environment variables are a default, not an override:** an `OLLAMA_*`
+(or `CORRECTOR_*` / `SENSITIVE_*`) env var only fills a field when `config.json`
 leaves it empty; an explicit value in `config.json` always wins.
 
 ```json
@@ -402,8 +402,8 @@ unparseable — it then falls back to a heuristic guess (or is dropped).
 | Parameter | Default | What to tune |
 | --------- | ------- | ------------ |
 | `protocol` | `ollama` | Wire format: `ollama` (native `/api/generate`) or `openai` (any OpenAI-compatible `/v1/chat/completions`). |
-| `model` / `base_url` | `qwen3.5:9b` / `...` | Model + endpoint. Env (default fallback when config omits the field): review/audit use `OLLAMA_MODEL` / `OLLAMA_BASE_URL`; final uses `FINAL_MODEL` / `FINAL_BASE_URL`. |
-| `api_key` | `""` | Bearer token for the endpoint; required by most external providers. Env (default fallback): review/audit use `OLLAMA_API_KEY`; final uses `FINAL_API_KEY`. |
+| `model` / `base_url` | `qwen3.5:9b` / `...` | Model + endpoint. Env (default fallback when config omits the field): review/audit use `OLLAMA_MODEL` / `OLLAMA_BASE_URL`. |
+| `api_key` | `""` | Bearer token for the endpoint; required by most external providers. Env (default fallback): review/audit use `OLLAMA_API_KEY`. |
 | `temperature` | `0.2` | Keep low (0.1–0.3) for stable verdicts; higher → more run-to-run variance. |
 | `num_ctx` | `16384` | **Context window** (Ollama only). Must cover input **plus** output. Raise this first for long text; too small truncates the final text. |
 | `max_tokens` | `8192` | Max output tokens. Must exceed the repaired text length, else `final_suggestion` is cut off. |
@@ -433,26 +433,15 @@ dependency). `example.env` is the committed template.
 | `OLLAMA_MODEL`          | `qwen3.5:9b`                                                   | Default LLM model for review / audit.         |
 | `OLLAMA_TIMEOUT`        | `300`                                                          | Default per-request timeout (seconds) for review / audit. |
 | `OLLAMA_API_KEY`        | *(empty)*                                                      | Bearer token for review / audit. |
-| `FINAL_PROTOCOL`        | —                                                              | Default `protocol` for final (Step 5 external model). |
-| `FINAL_BASE_URL`        | —                                                              | Default LLM base URL for final.             |
-| `FINAL_MODEL`           | —                                                              | Default LLM model for final.                  |
-| `FINAL_TIMEOUT`         | —                                                              | Default per-request timeout (seconds) for final.      |
-| `FINAL_API_KEY`         | —                                                              | Bearer token for final.            |
-| `LLM_PROTOCOL`          | `ollama`                                                       | *(legacy fallback)* Default `protocol` for review / audit / final. |
-| `LLM_BASE_URL`          | `http://localhost:11434`                                       | *(legacy fallback)* Default LLM base URL for all steps.    |
-| `LLM_MODEL`             | `qwen3.5:9b`                                                   | *(legacy fallback)* Default LLM model for all steps.         |
-| `LLM_TIMEOUT`           | `300`                                                          | *(legacy fallback)* Default per-request timeout for all steps. |
-| `LLM_API_KEY`           | *(empty)*                                                      | *(legacy fallback)* Default Bearer token for all steps. |
 | `SENSITIVE_REMOTE_BASE` | `https://cdn.jsdelivr.net/gh/konsheng/Sensitive-lexicon@master/Vocabulary/` | Source for `/api/sensitive/refresh`. |
 | `CONFIG_PATH`           | *(resolved as `$DATA_DIR/config.json`)*                       | Override the config file path.                         |
 | `API_KEYS_FILE`         | `*(resolved as `$DATA_DIR/.keys`)*`                              | API-key file (one key per line). Empty = open API.     |
 
 > **Env vars are a default, not an override.** For every field, `config.json`
 > wins: an env var is only applied when `config.json` leaves that field empty.
-> Precedence (lowest → highest): `OLLAMA_*` (shared local model for review +
-> audit) < `FINAL_*` (Step 5 external model) < `LLM_*` (legacy catch-all).
-> To point one step (e.g. Step 5) at a different provider, set that step's node
-> in `config.json` rather than adding more env vars.
+> `OLLAMA_*` fills review / audit transport fields. The final node (Step 5)
+> has no env var fallback — to point it at a different provider, set that
+> step's node in `config.json`.
 
 ### API-key authentication
 

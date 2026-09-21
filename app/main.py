@@ -146,15 +146,15 @@ async def lifespan(app: FastAPI):
         model=config["review"]["model"],
         timeout=config["review"]["timeout"],
         config=config["review"],
-        # ``load_config`` already merges the LLM_API_KEY env default into each
+        # ``load_config`` already merges the OLLAMA_API_KEY env default into the
         # step node's api_key when config.json omits it; settings is a backstop.
-        api_key=config["review"].get("api_key") or settings.llm_api_key,
+        api_key=config["review"].get("api_key") or settings.ollama_api_key,
     )
     # Per-step reviewers: review / audit / final each get their own TextReviewer
     # built from its config node, so Step 5 can point at an external LLM while
     # Steps 3/4 stay on the local Ollama. The /api/review endpoint uses the
     # review step's reviewer; the pipeline uses the whole map.
-    step_reviewers = build_step_reviewers(config, settings.llm_api_key)
+    step_reviewers = build_step_reviewers(config, settings.ollama_api_key)
     pipeline = TextPipeline(
         corrector, sensitive_engine, step_reviewers, review_config=config
     )
