@@ -180,7 +180,7 @@ app = FastAPI(
         "完整流程串联上述三步，返回综合修改意见。\n\n"
         "⚠️ Swagger 文档仅允许内网访问（私有IP段）。"
     ),
-    version="1.2.1",
+    version="1.2.2",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
