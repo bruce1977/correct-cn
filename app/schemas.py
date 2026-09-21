@@ -105,17 +105,35 @@ class ReviewRequest(BaseModel):
 
 
 class Issue(BaseModel):
-    """A single validated issue from the review."""
+    """A single validated issue from the review.
 
-    type: str = Field(..., description="'typo' or 'sensitive'.")
-    original: Optional[str] = Field(None, description="Original text (for typo).")
-    corrected: Optional[str] = Field(None, description="Corrected text (for typo).")
+    ``verdict`` disambiguates a confirmed problem from a false positive so the
+    pipeline can decide whether to apply the fix in the final text:
+      - typo_confirmed / typo_rejected
+      - sensitive_confirmed / sensitive_rejected
+      - grammar_confirmed   (漏报: grammar / semantic error found by review)
+    ``None`` means the parser could not assign a verdict (legacy / unknown).
+    """
+
+    type: str = Field(
+        ...,
+        description="'typo' | 'sensitive' | 'grammar' (grammar = 漏报 found by review).",
+    )
+    original: Optional[str] = Field(None, description="Original text (for typo/grammar).")
+    corrected: Optional[str] = Field(None, description="Corrected text (for typo/grammar).")
     word: Optional[str] = Field(None, description="Sensitive word (for sensitive).")
     category: Optional[str] = Field(None, description="Category (for sensitive).")
     line: int = Field(..., description="1-based line number.")
     start: int = Field(..., description="0-based start index.")
     end: int = Field(..., description="0-based exclusive end index.")
-    suggestion: str = Field("", description="Review suggestion for this issue.")
+    suggestion: str = Field("", description="Human-readable fix suggestion for this issue.")
+    verdict: Optional[str] = Field(
+        None,
+        description=(
+            "typo_confirmed / typo_rejected / sensitive_confirmed / "
+            "sensitive_rejected / grammar_confirmed. None = unknown."
+        ),
+    )
 
 
 class ReviewResponse(BaseModel):
@@ -123,6 +141,9 @@ class ReviewResponse(BaseModel):
 
     model: str
     reachable: bool = Field(..., description="Whether the Ollama endpoint answered.")
+    suggestions: Optional[str] = Field(
+        None, description="Raw LLM review text (human-readable 复核结论 + 漏报)."
+    )
     issues: List[Issue] = Field(default_factory=list, description="Validated issues.")
     error: Optional[str] = Field(None, description="Error detail if the call failed.")
 
@@ -138,7 +159,7 @@ class PipelineRequest(BaseModel):
         None,
         description=(
             "Enable the audit step (Step 4) to re-validate review suggestions. "
-            "None (default) falls back to config.json -> review.enable_audit."
+            "None (default) falls back to config.json -> audit.enabled."
         ),
     )
     enable_final_suggestion: Optional[bool] = Field(
@@ -146,7 +167,7 @@ class PipelineRequest(BaseModel):
         description=(
             "Enable final text generation (Step 5). When true, generates the "
             "corrected text based on confirmed issues. "
-            "None (default) falls back to config.json -> review.enable_final_suggestion."
+            "None (default) falls back to config.json -> final.enabled."
         ),
     )
 
@@ -163,11 +184,28 @@ class PipelineResponse(BaseModel):
     sensitive_words: List[SensitiveHit]
     issues: List[Issue] = Field(
         default_factory=list,
-        description="Validated issues with suggestions.",
+        description=(
+            "Validated issues from review: tool findings (typo/sensitive) plus "
+            "漏报 (grammar) found by the LLM, each with a verdict + fix suggestion."
+        ),
+    )
+    review_suggestions: Optional[str] = Field(
+        None,
+        description="Raw LLM review text (复核结论 + 漏报), for human inspection.",
+    )
+    audit: Optional[dict] = Field(
+        None,
+        description=(
+            "Optional 二次校验 (re-validation) result, present only when the "
+            "audit step ran (enable_audit=true)."
+        ),
     )
     final_suggestion: Optional[str] = Field(
         None,
-        description="Final corrected text (only when enable_final_suggestion=true).",
+        description=(
+            "Final corrected text (复核开关 / enable_final_suggestion=true). "
+            "Repairs confirmed errors + grammar/semantic, without style polishing."
+        ),
     )
 
 

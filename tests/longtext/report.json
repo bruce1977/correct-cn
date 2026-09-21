@@ -1,0 +1,297 @@
+[
+  {
+    "key": "wechat_article",
+    "title": "公众号文章（个人成长/生活方式）",
+    "char_count": 3040,
+    "pipeline_error": null,
+    "standalone_error": null,
+    "pipeline_seconds": 45.1,
+    "standalone_seconds": 6.8,
+    "issues_total": 7,
+    "issues_by_type": {
+      "typo": {
+        "typo_confirmed": 6
+      },
+      "grammar": {
+        "grammar_confirmed": 1
+      }
+    },
+    "grammar_missed_count": 1,
+    "has_issues": true,
+    "review_reachable": true,
+    "typo_report": [
+      {
+        "original": "即然",
+        "corrected": "既然",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "即/既 形近误用"
+      },
+      {
+        "original": "在也不能",
+        "corrected": "再也不能",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "在/再 误用"
+      },
+      {
+        "original": "变的",
+        "corrected": "得",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "的/得 误用（一个人变的）"
+      },
+      {
+        "original": "密诀",
+        "corrected": "秘诀",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "密/秘 形近误用"
+      }
+    ],
+    "sensitive_report": [],
+    "final_len": 3043,
+    "final_ratio": 1.001,
+    "final_anchors": "ok",
+    "expected_grammar": [
+      "大约坚持三十天左右（大约…左右 冗余）",
+      "目的是为了证明（目的…为了 冗余）"
+    ],
+    "standalone_reachable": true,
+    "standalone_issues_total": 4,
+    "standalone_grammar_missed": 1,
+    "standalone_by_type": {
+      "typo": {
+        "typo_confirmed": 3
+      },
+      "grammar": {
+        "grammar_confirmed": 1
+      }
+    },
+    "standalone_error_detail": null
+  },
+  {
+    "key": "news_report",
+    "title": "新闻（社会/法治报道）",
+    "char_count": 3019,
+    "pipeline_error": null,
+    "standalone_error": null,
+    "pipeline_seconds": 75.1,
+    "standalone_seconds": 12.2,
+    "issues_total": 7,
+    "issues_by_type": {
+      "typo": {
+        "typo_confirmed": 5
+      },
+      "sensitive": {
+        "sensitive_rejected": 2
+      }
+    },
+    "grammar_missed_count": 0,
+    "has_issues": true,
+    "review_reachable": true,
+    "typo_report": [
+      {
+        "original": "讯速",
+        "corrected": "迅速",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "讯/迅 形近误用"
+      },
+      {
+        "original": "布署",
+        "corrected": "部署",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "布/部 形近误用"
+      },
+      {
+        "original": "防犯",
+        "corrected": "防范",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "犯/范 形近误用"
+      },
+      {
+        "original": "做案",
+        "corrected": "作案",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "做/作 误用"
+      }
+    ],
+    "sensitive_report": [
+      {
+        "word": "炸药",
+        "expect": "confirm",
+        "found": true,
+        "verdict": "sensitive_rejected",
+        "note": "文中确为非法炸药，应确认敏感"
+      },
+      {
+        "word": "兼职",
+        "expect": "reject",
+        "found": true,
+        "verdict": "sensitive_rejected",
+        "note": "文中为'来路不明的兼职邀约'警示，语意中性，属误报应判非敏感"
+      }
+    ],
+    "final_len": 3019,
+    "final_ratio": 1.0,
+    "final_anchors": "ok",
+    "expected_grammar": [
+      "据警方介绍显示（据…显示/介绍 冗余）",
+      "约三十余名（约…余 冗余）"
+    ],
+    "standalone_reachable": true,
+    "standalone_issues_total": 6,
+    "standalone_grammar_missed": 2,
+    "standalone_by_type": {
+      "typo": {
+        "typo_confirmed": 4
+      },
+      "grammar": {
+        "grammar_confirmed": 2
+      }
+    },
+    "standalone_error_detail": null
+  },
+  {
+    "key": "novel_chapter",
+    "title": "小说章节（都市网文）",
+    "char_count": 3039,
+    "pipeline_error": null,
+    "standalone_error": null,
+    "pipeline_seconds": 50.0,
+    "standalone_seconds": 16.5,
+    "issues_total": 5,
+    "issues_by_type": {
+      "typo": {
+        "typo_confirmed": 3,
+        "typo_rejected": 1
+      },
+      "grammar": {
+        "grammar_confirmed": 1
+      }
+    },
+    "grammar_missed_count": 1,
+    "has_issues": true,
+    "review_reachable": true,
+    "typo_report": [
+      {
+        "original": "按奈",
+        "corrected": "按捺",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "奈/捺 形近误用"
+      },
+      {
+        "original": "飘渺",
+        "corrected": "缥缈",
+        "found": true,
+        "verdict": "typo_rejected",
+        "note": "飘/缥 形近误用"
+      },
+      {
+        "original": "松驰",
+        "corrected": "松弛",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "驰/弛 形近误用"
+      }
+    ],
+    "sensitive_report": [],
+    "final_len": 3039,
+    "final_ratio": 1.0,
+    "final_anchors": "ok",
+    "expected_grammar": [
+      "文学化表达，语法问题较少，重点观察漏报错别字/语义即可"
+    ],
+    "standalone_reachable": true,
+    "standalone_issues_total": 7,
+    "standalone_grammar_missed": 2,
+    "standalone_by_type": {
+      "typo": {
+        "typo_confirmed": 5
+      },
+      "grammar": {
+        "grammar_confirmed": 2
+      }
+    },
+    "standalone_error_detail": null
+  },
+  {
+    "key": "tech_blog",
+    "title": "技术博客（网关设计复盘）",
+    "char_count": 3058,
+    "pipeline_error": null,
+    "standalone_error": null,
+    "pipeline_seconds": 67.6,
+    "standalone_seconds": 8.3,
+    "issues_total": 6,
+    "issues_by_type": {
+      "typo": {
+        "typo_confirmed": 5
+      },
+      "sensitive": {
+        "sensitive_confirmed": 1
+      }
+    },
+    "grammar_missed_count": 0,
+    "has_issues": true,
+    "review_reachable": true,
+    "typo_report": [
+      {
+        "original": "参于",
+        "corrected": "参与",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "于/与 误用"
+      },
+      {
+        "original": "部属",
+        "corrected": "部署",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "属/署 形近误用"
+      },
+      {
+        "original": "掉用",
+        "corrected": "调用",
+        "found": true,
+        "verdict": "typo_confirmed",
+        "note": "掉/调 形近误用"
+      }
+    ],
+    "sensitive_report": [
+      {
+        "word": "破解",
+        "expect": "reject",
+        "found": true,
+        "verdict": "sensitive_confirmed",
+        "note": "文中'破解工程难题'，语意中性，属误报应判非敏感"
+      }
+    ],
+    "final_len": 3065,
+    "final_ratio": 1.002,
+    "final_anchors": "ok",
+    "expected_grammar": [
+      "通过把配额和调用方绑定，从而既保护了上游，也使每个团队都能看到自己的用量（通过…从而…使 缺主语）"
+    ],
+    "standalone_reachable": true,
+    "standalone_issues_total": 4,
+    "standalone_grammar_missed": 2,
+    "standalone_by_type": {
+      "grammar": {
+        "grammar_confirmed": 2
+      },
+      "typo": {
+        "typo_confirmed": 1
+      },
+      "sensitive": {
+        "sensitive_confirmed": 1
+      }
+    },
+    "standalone_error_detail": null
+  }
+]

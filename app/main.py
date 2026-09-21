@@ -34,7 +34,7 @@ from fastapi.responses import JSONResponse
 from app.config import DEFAULT_CONFIG, Settings, load_config
 from app.corrector import TextCorrector
 from app.pipeline import TextPipeline
-from app.reviewer import TextReviewer
+from app.reviewer import TextReviewer, build_step_reviewers
 from app.schemas import (
     CorrectRequest,
     CorrectResponse,
@@ -146,10 +146,17 @@ async def lifespan(app: FastAPI):
         model=config["review"]["model"],
         timeout=config["review"]["timeout"],
         config=config["review"],
-        api_key=settings.ollama_api_key,
+        # ``load_config`` already merges the LLM_API_KEY env default into each
+        # step node's api_key when config.json omits it; settings is a backstop.
+        api_key=config["review"].get("api_key") or settings.llm_api_key,
     )
+    # Per-step reviewers: review / audit / final each get their own TextReviewer
+    # built from its config node, so Step 5 can point at an external LLM while
+    # Steps 3/4 stay on the local Ollama. The /api/review endpoint uses the
+    # review step's reviewer; the pipeline uses the whole map.
+    step_reviewers = build_step_reviewers(config, settings.llm_api_key)
     pipeline = TextPipeline(
-        corrector, sensitive_engine, reviewer, review_config=config["review"]
+        corrector, sensitive_engine, step_reviewers, review_config=config
     )
 
     app.state.settings = settings
@@ -157,7 +164,7 @@ async def lifespan(app: FastAPI):
     app.state.sensitive_engine = sensitive_engine
     app.state.corrector = corrector
     app.state.corrector_error = corrector_error
-    app.state.reviewer = reviewer
+    app.state.reviewer = step_reviewers["review"]
     app.state.pipeline = pipeline
 
     yield
@@ -360,6 +367,8 @@ def pipeline(req: PipelineRequest):
         typos=result["typos"],
         sensitive_words=result["sensitive_words"],
         issues=result["issues"],
+        review_suggestions=result.get("review_suggestions"),
+        audit=result.get("audit"),
         final_suggestion=result["final_suggestion"],
     )
 
