@@ -117,8 +117,13 @@ class TextCorrector:
                     begin = err.get("begin", err.get("start", 0))
                     end = err.get("end", begin)
                     corrected_word = err.get("corrected", err.get("target", word))
-                else:
+                elif len(err) == 3:
+                    word, corrected_word, begin = err
+                    end = begin + len(word)
+                elif len(err) >= 4:
                     word, begin, end, corrected_word = err[:4]
+                else:
+                    continue
                 errors.append(
                     {
                         "line": line_no,

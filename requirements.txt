@@ -6,7 +6,7 @@ pydantic>=2.0
 # Chinese typo/error correction (pulls in torch + transformers).
 # MacBertCorrector is imported lazily, so the rest of the service (sensitive
 # detection, pipeline orchestration, tests) works without these installed.
-pycorrector>=0.4.7
+pycorrector==1.1.4
 # The baked-in model is stored as safetensors; ensure the loader is present.
 safetensors>=0.4
 
