@@ -7,5 +7,6 @@ pydantic>=2.0
 # MacBertCorrector is imported lazily, so the rest of the service (sensitive
 # detection, pipeline orchestration, tests) works without these installed.
 pycorrector>=0.4.7
+torch>=2.0
 # The baked-in model is stored as safetensors; ensure the loader is present.
 safetensors>=0.4
