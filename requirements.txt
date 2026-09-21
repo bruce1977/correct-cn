@@ -7,6 +7,7 @@ pydantic>=2.0
 # MacBertCorrector is imported lazily, so the rest of the service (sensitive
 # detection, pipeline orchestration, tests) works without these installed.
 pycorrector>=0.4.7
-torch>=2.0
+# CPU-only torch keeps the image small (~200MB vs ~3GB for CUDA version).
+torch>=2.0 --index-url https://download.pytorch.org/whl/cpu
 # The baked-in model is stored as safetensors; ensure the loader is present.
 safetensors>=0.4
