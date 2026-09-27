@@ -1,6 +1,6 @@
 # correct-cn API image
 # Python 3.11 slim image keeps the base layer small.
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Runtime environment. HF/Transformers are forced offline so the baked-in model
 # is used and no network call is made at startup.
@@ -18,11 +18,15 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Install Python dependencies first to leverage Docker layer caching.
+# Use Tsinghua mirror for faster downloads in China.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/ --trusted-host pypi.tuna.tsinghua.edu.cn
 
 # Application source.
 COPY app ./app
+
+# Ensure /data directory exists for volume mount.
+RUN mkdir -p /data
 
 # Bake the pre-downloaded correction model into the offline HF cache so the
 # container works without internet access.

@@ -3,21 +3,29 @@
 On startup the service:
   * ensures ``DATA_DIR`` exists and seeds it with the built-in sensitive-word
     dictionaries and the unified ``config.json`` (only when they are missing),
-  * loads the API keys (``/data/keys.txt``) used to gate the API endpoints,
+  * loads the API keys (``/data/.keys``) used to gate the API endpoints,
   * loads the sensitive-word engine (dictionaries are auto-discovered),
   * loads the MacBert correction model (heavy; failure is non-fatal),
   * prepares the Ollama reviewer and the combined pipeline.
 
 API endpoints are protected by a simple API-key check (see :func:`require_api_key`).
-When ``keys.txt`` is empty, the API is open. ``/health`` and ``/`` are always open.
+When ``.keys`` is empty, the API is open. ``/health`` is always open.
 """
 
 import json
+import logging
 import os
 import shutil
 import ipaddress
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,7 +34,7 @@ from fastapi.responses import JSONResponse
 from app.config import DEFAULT_CONFIG, Settings, load_config
 from app.corrector import TextCorrector
 from app.pipeline import TextPipeline
-from app.reviewer import TextReviewer
+from app.reviewer import TextReviewer, build_step_reviewers
 from app.schemas import (
     CorrectRequest,
     CorrectResponse,
@@ -96,7 +104,7 @@ def _seed_data_dir(data_dir: str) -> None:
     # Unified configuration file (corrector / sensitive / review nodes).
     dst_cfg = Path(data_dir) / "config.json"
     if not dst_cfg.exists():
-        src_cfg = DEFAULTS_DIR / "configs" / "config.json"
+        src_cfg = DEFAULTS_DIR / "config.json"
         if src_cfg.is_file():
             shutil.copy2(src_cfg, dst_cfg)
         else:
@@ -138,10 +146,17 @@ async def lifespan(app: FastAPI):
         model=config["review"]["model"],
         timeout=config["review"]["timeout"],
         config=config["review"],
-        api_key=settings.ollama_api_key,
+        # ``load_config`` already merges the OLLAMA_API_KEY env default into the
+        # step node's api_key when config.json omits it; settings is a backstop.
+        api_key=config["review"].get("api_key") or settings.ollama_api_key,
     )
+    # Per-step reviewers: review / audit / final each get their own TextReviewer
+    # built from its config node, so Step 5 can point at an external LLM while
+    # Steps 3/4 stay on the local Ollama. The /api/review endpoint uses the
+    # review step's reviewer; the pipeline uses the whole map.
+    step_reviewers = build_step_reviewers(config, settings.ollama_api_key)
     pipeline = TextPipeline(
-        corrector, sensitive_engine, reviewer, review_config=config["review"]
+        corrector, sensitive_engine, step_reviewers, review_config=config
     )
 
     app.state.settings = settings
@@ -149,7 +164,7 @@ async def lifespan(app: FastAPI):
     app.state.sensitive_engine = sensitive_engine
     app.state.corrector = corrector
     app.state.corrector_error = corrector_error
-    app.state.reviewer = reviewer
+    app.state.reviewer = step_reviewers["review"]
     app.state.pipeline = pipeline
 
     yield
@@ -165,7 +180,7 @@ app = FastAPI(
         "完整流程串联上述三步，返回综合修改意见。\n\n"
         "⚠️ Swagger 文档仅允许内网访问（私有IP段）。"
     ),
-    version="1.1.0",
+    version="1.2.2",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -229,24 +244,11 @@ def require_api_key(
 
 
 # --------------------------------------------------------------------------- #
-# Health (open)
+# Health (open, no API key required)
 # --------------------------------------------------------------------------- #
-@app.get("/health", response_model=HealthResponse, tags=["System"])
+@app.get("/health", tags=["System"])
 def health():
-    cfg = app.state.config
-    s: Settings = app.state.settings
-    engine: SensitiveEngine = app.state.sensitive_engine
-    reviewer: TextReviewer = app.state.reviewer
-    return HealthResponse(
-        status="ok" if app.state.corrector else "degraded",
-        corrector_model=cfg["corrector"]["model"],
-        corrector_mode=cfg["corrector"].get("mode", "model"),
-        ollama_model=cfg["review"]["model"],
-        ollama_base_url=cfg["review"]["base_url"],
-        ollama_reachable=reviewer.is_reachable(),
-        categories_loaded=len(engine.get_categories()),
-        sensitive_word_count=engine.get_word_count(),
-    )
+    return {}
 
 
 # --------------------------------------------------------------------------- #
@@ -284,7 +286,6 @@ def sensitive_check(req: SensitiveCheckRequest):
         is_sensitive=result["is_sensitive"],
         count=result["count"],
         sensitive_words=[SensitiveHit(**h) for h in result["sensitive_words"]],
-        categories_checked=result["categories_checked"],
     )
 
 
@@ -330,7 +331,13 @@ def sensitive_refresh(req: SensitiveRefreshRequest):
 @app.post("/api/review", response_model=ReviewResponse, dependencies=[Depends(require_api_key)], tags=["Review"])
 def review(req: ReviewRequest):
     reviewer: TextReviewer = app.state.reviewer
-    return ReviewResponse(**reviewer.review(req.text))
+    result = reviewer.review(
+        req.text,
+        typos=req.typos,
+        sensitive_hits=req.sensitive_hits,
+    )
+    logger.info("Review endpoint: issues_count=%d, error=%s", len(result.get("issues", [])), result.get("error"))
+    return ReviewResponse(**result)
 
 
 # --------------------------------------------------------------------------- #
@@ -348,15 +355,20 @@ def pipeline(req: PipelineRequest):
             status_code=503,
             detail=f"Correction model unavailable: {app.state.corrector_error}",
         )
-    result = app.state.pipeline.run(req.text, enable_summary=req.enable_summary)
+    result = app.state.pipeline.run(
+        req.text,
+        enable_audit=req.enable_audit,
+        enable_final_suggestion=req.enable_final_suggestion,
+    )
     return PipelineResponse(
         original=result["original"],
         corrected_text=result["corrected_text"],
         has_issues=result["has_issues"],
         typos=result["typos"],
         sensitive_words=result["sensitive_words"],
-        review=ReviewResponse(**result["review"]),
-        summary=(ReviewResponse(**result["summary"]) if result["summary"] else None),
+        issues=result["issues"],
+        review_suggestions=result.get("review_suggestions"),
+        audit=result.get("audit"),
         final_suggestion=result["final_suggestion"],
     )
 
@@ -370,22 +382,3 @@ def keys_reload():
     s: Settings = app.state.settings
     app.state.api_keys = _load_api_keys(s.api_keys_file)
     return {"loaded": len(app.state.api_keys)}
-
-
-@app.get("/")
-def root():
-    return {
-        "service": "correct-cn",
-        "version": "1.1.0",
-        "auth_required": bool(app.state.api_keys),
-        "endpoints": [
-            "/health",
-            "/api/correct",
-            "/api/sensitive/check",
-            "/api/sensitive/dictionaries",
-            "/api/sensitive/refresh",
-            "/api/review",
-            "/api/pipeline",
-            "/api/keys/reload",
-        ],
-    }
